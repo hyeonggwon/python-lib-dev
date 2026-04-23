@@ -298,3 +298,56 @@ loop_target: implement | design | null
 | new 작업 공간 | `outputs/<run-id>/workspace/` 격리 |
 | evolve 작업 공간 | `target_repo_path` + `harness/<run-id>` 브랜치 |
 | 하네스 설치 위치 | `~/harnesses/`, skills는 `~/.claude/skills/` |
+
+---
+
+# Amendments (구축 중 결정 변경)
+
+이 섹션은 **위 원본 답변 확정 이후 실제 구축 과정에서 재검토되어 바뀐 결정들**을 기록한다. 원본은 의사결정 스냅샷으로 보존하고, 현재 하네스가 실제로 따르는 규약은 이 Amendments를 우선한다.
+
+각 항목은 `원본 → 실제 + 이유` 형식.
+
+## A1. 하네스 설치 구조 (논의점 5 수정)
+
+- **원본**: `~/harnesses/` 에 하네스 루트, skills는 **`~/.claude/skills/` 에 직접 파일 생성**.
+- **실제**: Skill 정본은 `~/harnesses/python-lib-dev/skills/<name>/SKILL.md`. `~/.claude/skills/<name>` 은 이 정본을 가리키는 **symlink**. `install.sh` / `uninstall.sh` 가 symlink 생성/제거를 담당.
+- **이유**: 하네스의 **자기완결성**. `~/.claude/skills/` 에 직접 파일을 두면 하네스 디렉토리 삭제 시 두 곳을 건드려야 하고, git 한 단위로 배포하기 어렵다. Symlink 방식이면 `git clone && ./install.sh` 한 줄로 타인 배포 가능하고, Claude Code는 `~/.claude/skills/` 규약대로 자동 로드.
+
+## A2. `init_run.py` 위치 (논의점 5 수정)
+
+- **원본**: `~/harnesses/scripts/init_run.py` 를 **모든 하네스가 공유**.
+- **실제**: `~/harnesses/python-lib-dev/scripts/init_run.py` 로 이 하네스 **전용**.
+- **이유**: A1과 동일한 자기완결성 원칙. `init_run.py` 는 40줄 안팎으로 작아 중복 비용이 거의 없고, 공용으로 두면 `python-lib-dev` 만 받아서 쓰려는 사용자가 별도 공용 파일을 추가로 챙겨야 한다. harness-builder 기본 규약과 달라졌다.
+
+## A3. Preflight 위치 및 구현 (논의점 5 확인 사항 #3)
+
+- **원본**: Preflight 로직은 "`init_run.py` 또는 orchestrating skill 진입부"에 둔다(확정 전 확인 필요).
+- **실제**: `~/harnesses/python-lib-dev/scripts/preflight.py` 로 **독립 파일**. `run.py` 가 진입 시 subprocess 로 호출. `uv` / `git` / `claude` 설치 확인 + evolve 시 `target_repo_path` 의 git repo 여부 / dirty tree 검증.
+- **이유**: 책임 분리. `init_run.py` 는 `outputs/<run-id>/` 와 `state.json` 초기화만 담당해야 단순성을 유지함. Skill 진입부에 파이썬 로직을 넣으면 메인 세션이 해석해야 하는 지시가 늘어난다.
+
+## A4. Placeholder 치환 방식 (원본엔 없던 결정)
+
+- **원본**: 이 결정이 다뤄지지 않음.
+- **구축 중 1차 결정 (Plan Y)**: `install.sh` 가 정본의 `{{HARNESS_ROOT}}` placeholder를 실제 절대 경로로 `sed` 치환.
+- **실제 (Plan Z)**: 치환 없음. 정본은 `{{HARNESS_ROOT}}` 를 **영구 유지**. 메인 세션이 skill 로드 시 `realpath` 기반 bash 한 줄로 runtime resolve. 프롬프트 파일(`scripts/prompts/*.md`) 안의 `{HARNESS_ROOT}`, `{run_dir}`, `{run_id}`, `{target_repo_path}`, `{lib_name}` 도 `run.py` 가 매 headless 호출마다 `{run_dir}/.prompts/<stage>.md` 로 치환본을 생성.
+- **이유**: Install-time 치환은 파일 수정 워크플로우와 근본적으로 충돌했다. SKILL.md 를 편집하면 치환본이 수정되고, git commit 시 절대 경로가 그대로 유출된다. 또한 디렉토리 이동 시 "이전 경로 → 새 경로" 재치환 로직이 install.sh 에 필요해진다. Runtime resolve 로 전환하면 파일 수정/git 관리/디렉토리 이동이 모두 자연스럽게 해결된다. `install.sh` 는 symlink 생성/갱신만 담당하며, 옮긴 후 `./install.sh` 한 번으로 symlink가 갱신된다.
+
+## A5. evolve 브랜치명 (논의점 5, "주요 결정 요약" 수정)
+
+- **원본**: 시작 시점에 **`git checkout -b harness/<run-id>` 강제** (고정).
+- **실제**: `harness/<run-id>` 는 **기본값**. Interview 필수 질문 #7 `작업 브랜치명` 에서 사용자에게 반드시 물어보고, 기본값으로 OK 하면 그대로, 커스텀 이름을 주면 그 값으로 확정. `mode.json.branch_name` 에 확정된 문자열을 저장하고 `run.py` 의 preflight 에서 `git checkout -b <branch_name>` 수행.
+- **이유**: 고정 `harness/<run-id>` 는 timestamp 기반이라 의미 전달이 0이고 팀 컨벤션(`feat/`, `fix/` 등)과 충돌 가능. 기본값 유지로 자동 추적/정리 이점을 살리면서 override 여지를 열어두는 것이 유연성 / 추적성의 균형점.
+
+## A6. 주요 결정 요약 표 갱신
+
+원본 표의 일부 항목이 위 Amendments 로 무효화됨. 갱신된 최신 값:
+
+| 항목 | 최신 결정 |
+|---|---|
+| 하네스 설치 위치 | 정본 `~/harnesses/python-lib-dev/`, symlink `~/.claude/skills/<name>` |
+| `init_run.py` 위치 | `~/harnesses/python-lib-dev/scripts/init_run.py` (하네스 전용) |
+| Preflight 위치 | `~/harnesses/python-lib-dev/scripts/preflight.py` |
+| Placeholder 전략 | 정본은 placeholder 유지, runtime resolve (install-time 치환 없음) |
+| evolve 브랜치명 | interview 확정값 (기본 `harness/<run-id>`, 사용자 override 가능) |
+
+나머지 항목(대상, 도구 스택, 레이아웃, 모드 분기, 블로킹 게이트, 리뷰어, verdict 스키마, 루프 cap, 기획 루프백, 정체 감지, 종료 상태, new/evolve 작업 공간)은 원본 결정이 그대로 구현되었다.
