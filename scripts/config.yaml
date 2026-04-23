@@ -1,0 +1,33 @@
+# python-lib-dev — harness configuration
+# Default values. Interview may override thresholds per run via mode.json.overrides.
+# caps are hard and not overridable by interview (only by editing this file).
+
+caps:
+  impl_retry: 5          # s4 internal retries (test run failures, import errors)
+  minor_loop: 3          # s5 MINOR -> s4
+  major_loop: 2          # s5 MAJOR -> s2
+  total_stages: 15       # cumulative stage invocations across the whole run
+
+thresholds:
+  line_coverage: 0.90
+  branch_coverage: 0.80
+  max_major_issues_new: 0
+  max_major_issues_evolve: 2
+
+stagnation:
+  min_overlap_ratio: 0.5   # two consecutive verdict.issues_key overlap triggering escalation
+  window: 2                # number of consecutive verdicts inspected
+
+review:
+  sub_agents: []           # future: ["api-critic", "test-skeptic", "doc-reviewer"]
+
+fixed_tooling:
+  package_manager: uv
+  build_backend: hatchling
+  test_framework: pytest
+  linter: ruff
+  type_checker: mypy_strict
+  python_min_default: "3.10"
+  docstring_style: google
+  ci_matrix: ["3.10", "3.11", "3.12", "3.13"]
+  commit_style: conventional

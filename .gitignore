@@ -1,0 +1,19 @@
+# Harness run artifacts (every invocation creates a timestamped dir).
+outputs/
+
+# Install state marker (recreated on install.sh run if ever needed).
+.installed-marker
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
