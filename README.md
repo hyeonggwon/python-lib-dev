@@ -3,16 +3,20 @@
 PyPI 공개 수준 품질의 파이썬 라이브러리 1개를 기획 → 설계 → 테스트 → 구현 → 리뷰 → 문서화 파이프라인으로 만들거나 고치는 Claude Code 하네스.
 한 번의 실행 = 하나의 라이브러리(`new`) 또는 하나의 변경 요구(`evolve`).
 
-## Quick Start
+## Init
 
 ```bash
 uv pip install pyyaml    # 또는 pip install pyyaml, 최초 한 번만 실행
-./install.sh             # 최초 한 번만 실행
+./install.sh             # ~/.claude/skills/ symlink 생성 스크립트, 최초 한 번만 실행
 ```
 
-그 다음 Claude Code 세션에서 "파이썬 라이브러리 만들어줘" / "이 라이브러리에 X 기능 추가" 같이 요청하거나 `orchestrate-python-lib` skill을 트리거. 메인 세션이 interview → run 초기화 → 파이프라인 실행을 끝까지 몰아간다. 블로킹 게이트에서 멈추면 `<gate>.decision.md`를 함께 작성하고 재개.
-
 제거는 `./uninstall.sh` (symlink만 제거).
+
+## Quick Start
+Claude Code 세션 
+-> "파이썬 라이브러리 만들어줘" / "이 라이브러리에 X 기능 추가" 같이 요청 or `orchestrate-python-lib` skill을 트리거
+-> 메인 세션이 interview → run 초기화 → 파이프라인 실행을 끝까지 몰아간다.
+-> 블로킹 게이트에서 멈추면 `<gate>.decision.md`를 함께 작성하고 재개.
 
 ## How It Works
 
