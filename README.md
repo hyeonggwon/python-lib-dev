@@ -89,7 +89,7 @@ workspace/                    # new 모드 산출물 (실제 라이브러리 본
 - `claude` CLI (Claude Code)
 - `uv`
 - `git`
-- Python 3.10+
+- `Python 3.10+`
 - `PyYAML` (`run.py`가 `config.yaml` 파싱에 사용. `uv pip install pyyaml` 또는 `pip install pyyaml`)
 
 생성되는 라이브러리 쪽 고정 스택: `uv` · `hatchling` · `pytest` · `ruff` · `mypy --strict` · `src/` 레이아웃 · Google docstring · Conventional Commits · GitHub Actions 3.10/3.11/3.12/3.13.
