@@ -2,8 +2,12 @@
 
 [한국어](README.md) | **English**
 
+<div align="center">
+<img width="480" height="360" alt="python-lib-dev-logo" src="https://github.com/user-attachments/assets/ed2a2885-38ea-443d-93e4-c15b3e062b1f" />
+</div>
+</br>
+
 A Claude Code harness that builds or updates a single Python library through a planning → design → testing → implementation → review → documentation pipeline.
-One run = one library (`new`) or one change request (`evolve`).
 
 ## Initialize
 
