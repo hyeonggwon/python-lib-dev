@@ -5,8 +5,7 @@
 <div align="center">
 <img width="480" height="360" alt="python-lib-dev-logo" src="https://github.com/user-attachments/assets/ed2a2885-38ea-443d-93e4-c15b3e062b1f" />
 </div>
-
-## About
+</br>
 파이썬 라이브러리 1개를 기획 → 설계 → 테스트 → 구현 → 리뷰 → 문서화 파이프라인으로 만들거나 고치는 Claude Code 하네스.
 한 번의 실행 = 하나의 라이브러리(`new`) 또는 하나의 변경 요구(`evolve`).
 
