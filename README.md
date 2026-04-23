@@ -1,6 +1,6 @@
 # python-lib-dev
 
-PyPI 공개 수준 품질의 파이썬 라이브러리 1개를 기획 → 설계 → 테스트 → 구현 → 리뷰 → 문서화 파이프라인으로 만들거나 고치는 Claude Code 하네스.
+파이썬 라이브러리 1개를 기획 → 설계 → 테스트 → 구현 → 리뷰 → 문서화 파이프라인으로 만들거나 고치는 Claude Code 하네스.
 한 번의 실행 = 하나의 라이브러리(`new`) 또는 하나의 변경 요구(`evolve`).
 
 ## Init
@@ -49,7 +49,6 @@ python-lib-dev/
 ```
 
 - 레포 자체는 라이브러리가 아니다. stdlib + PyYAML만 쓰는 얇은 오케스트레이션 계층.
-- skill/docs의 `{{HARNESS_ROOT}}`는 install 시점에 치환하지 않고 메인 세션이 runtime에 resolve한다.
 
 ## 생성되는 파일
 
@@ -75,15 +74,11 @@ workspace/                    # new 모드 산출물 (실제 라이브러리 본
   pyproject.toml, src/<pkg>/, tests/, README.md, docs/, CHANGELOG.md
 ```
 
-evolve 모드는 `target_repo_path`에 `git checkout -b <branch_name>` (기본 `harness/<run-id>`) 후 직접 수정. `main`/`master`에 머지하지 않음.
-
 ## Development
 
 이 레포를 수정할 때는 **`CLAUDE.md`를 먼저 읽는다.** 요약하면:
 
 - `skills/<name>/SKILL.md`가 정본, `~/.claude/skills/` 하위는 symlink. 직접 편집 금지.
-- `{{HARNESS_ROOT}}`과 `{run_dir}` 같은 토큰은 install 시점에 치환하지 않는다. 그대로 둔다.
-- `docs/discussion-log.md`의 원본 섹션은 수정하지 말고 `# Amendments`에 `A7. ...` 형식으로 추가.
 - 루트에 `pyproject.toml` / `src/` / `tests/`를 만들지 말 것 — 이 레포는 라이브러리가 아님.
 - `outputs/`는 커밋 금지.
 
