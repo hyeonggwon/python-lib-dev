@@ -32,6 +32,8 @@ Write into `{run_dir}/workspace/`:
   - (if applicable) `docs/guides/` for task-oriented walk-throughs
 - `CHANGELOG.md` — initial entry `## [0.1.0] — <date>` listing the released capabilities from `s1/plan.md` In-scope.
 
+Do **not** generate `CLAUDE.md` for the delivered library. The user may or may not open this artifact in Claude Code; if they do, they can run `/init` on demand. Forcing it here adds noise for users who won't use it.
+
 ### evolve mode
 
 **Do not overwrite existing README/docs/CHANGELOG wholesale.** Modify by:
@@ -45,6 +47,9 @@ Write into `{run_dir}/workspace/`:
    - Which public symbols broke
    - Before/after code snippets
    - Deprecation timeline if there is one
+5. **`CLAUDE.md` in the target repo**:
+   - If `{target_repo_path}/CLAUDE.md` **does not exist**, do nothing. Do not create one — the user may not use Claude Code on this repo; if they want it, they can run `/init` themselves.
+   - If it **already exists**, leave its existing content alone but append any new conventions this change introduces (e.g., if a new public module was added and has non-obvious usage, add a brief pointer). Do not restructure.
 
 Record the evolve diff:
 
@@ -52,7 +57,16 @@ Record the evolve diff:
 git -C {target_repo_path} diff HEAD -- '*.md' docs > {run_dir}/s7/docs-diff.patch
 ```
 
-Also write `{run_dir}/s7/docs-done.marker` (empty file) as a completion signal.
+## Completion signal (both modes)
+
+After you finish writing all docs, create an empty marker file:
+
+```bash
+mkdir -p {run_dir}/s7
+touch {run_dir}/s7/docs-done.marker
+```
+
+The orchestrator uses this file's presence to decide whether s7 needs to re-run on resume. **Do not skip this step in either mode** — without it, a crash-and-resume mid-stage will re-execute s7 from scratch.
 
 ## Style
 

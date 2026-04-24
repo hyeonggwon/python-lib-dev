@@ -33,7 +33,7 @@
 
 - 시작 시 `outputs/<run-id>/workspace/` 로 이동해 `uv init --lib <pkg_name>` 실행. `src/<pkg>/` 레이아웃 자동 생성.
 - `pyproject.toml`에 `requires-python = ">=3.10"` (interview 값), `tool.ruff`, `tool.mypy`, `tool.pytest.ini_options` 설정.
-- 최종 배포 목적지는 결정하지 않는다. `DELIVERY.md`에 사용자가 이동할 책임 명시.
+- 최종 배포 목적지는 결정하지 않는다. `delivery.md`에 사용자가 이동할 책임 명시.
 
 ### evolve 모드
 
@@ -51,7 +51,7 @@
   - `plan.md`, `design.md`, `api_stubs.py`
   - `tests/` 또는 `s3/tests-new/`
   - 실제 코드 (new: `workspace/src/`, evolve: git diff 기반 변경 파일)
-  - 테스트 실행 결과(`s5/test-run.log`)
+  - **기계 게이트 결과(`{run_dir}/gates/*.json`)** — orchestrator가 s5 직전에 돌림. s5는 읽기만, 재실행 금지 (0-2 clean separation).
 - 리뷰어가 구현자 노트(`s4/impl-notes.md`)를 참조하는 것은 허용하나, 그 내용을 **근거로 삼지 않는다** — 리뷰는 산출물 자체로만 판정.
 
 ## Verdict 형식
@@ -67,15 +67,15 @@
 - `MAJOR` → 설계 루프 (cap 2)
 - `CRITICAL` → 사용자 게이트 (자동 루프백 금지)
 - 기획(s1)으로의 자동 루프백은 **없다**.
-- 구현 내부 재시도 cap 5 (예: 테스트 실행 실패, import 오류 등 기술적 재시도).
+- 구현(s4) 내부 재시도는 s4 헤드리스가 스스로 제한(권장 5회). 하네스는 카운트하지 않음. 해결 못 하면 `impl-notes.md`에 "Blocked — needs review"로 기록해 s5로 넘김.
 - 전체 stage 누적 cap 15.
-- 정체 감지: 연속 2개 verdict의 `issues[].file + severity` 조합이 50% 이상 겹치면 에스컬레이션.
+- 정체 감지: 연속 3개 verdict의 `issues[].file + severity` 조합이 50% 이상 겹치면 에스컬레이션.
 
 ---
 
 ## 하네스가 하지 않는 것
 
-- `uv publish` / PyPI 배포 자동 실행 금지. 사용자가 `DELIVERY.md` 읽고 수동으로.
+- `uv publish` / PyPI 배포 자동 실행 금지. 사용자가 `delivery.md` 읽고 수동으로.
 - evolve 모드에서 `main`/`master` 자동 머지 금지.
 - 하드 게이트 스킵 금지. 통과 못 하면 에스컬레이션.
 - Sub-agent를 `.claude/agents/`에 추가로 생성하지 않는다 (초기 단계 결정).

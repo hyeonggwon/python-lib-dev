@@ -28,7 +28,7 @@ In a Claude Code session
 3. **Orchestrate** — `scripts/run.py --run-id <id>` calls each stage (s0..s8) headlessly.
 4. **Gates** — When a blocking gate (evolve's survey, plan, design) is hit, it writes `<gate>.request.md` and stops. After writing the decision with the user, resume with the same command.
 5. **Loop** — Based on the s5 review verdict, MINOR → loop back to s4, MAJOR → loop back to s2 automatically. On CRITICAL / cap exceeded / stall, it writes `escalation.md` and stops.
-6. **Deliver** — Once all stages pass, it generates `DELIVERY.md` and exits.
+6. **Deliver** — Once all stages pass, it generates `delivery.md` and exits.
 
 Stage definitions, state/verdict schemas, and gate formats are in `docs/stages.md`.
 
@@ -65,13 +65,14 @@ s1/plan.md
 s2/{design.md, api_stubs.py}
 s3/...                        # new writes directly to workspace/tests/, evolve to tests-new/
 s4/{impl-notes.md, changes.patch}   # changes.patch is evolve only
-s5/{review.md, verdict.yaml, test-run.log}
+gates/{summary.json, tests.json, mypy.json, ruff_check.json, ruff_format.json, coverage.json}
+s5/{review.md, verdict.yaml}
 s6/decision.json
 gate0.request.md / gate0.decision.md    # evolve only
 gateA.request.md / gateA.decision.md
 gateB.request.md / gateB.decision.md
 escalation.md / escalation.decision.md  # if needed
-DELIVERY.md
+delivery.md
 
 workspace/                    # new mode artifacts (the actual library body)
   pyproject.toml, src/<pkg>/, tests/, README.md, docs/, CHANGELOG.md

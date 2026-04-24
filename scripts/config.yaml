@@ -3,7 +3,6 @@
 # caps are hard and not overridable by interview (only by editing this file).
 
 caps:
-  impl_retry: 5          # s4 internal retries (test run failures, import errors)
   minor_loop: 3          # s5 MINOR -> s4
   major_loop: 2          # s5 MAJOR -> s2
   total_stages: 15       # cumulative stage invocations across the whole run
@@ -15,8 +14,8 @@ thresholds:
   max_major_issues_evolve: 2
 
 stagnation:
-  min_overlap_ratio: 0.5   # two consecutive verdict.issues_key overlap triggering escalation
-  window: 2                # number of consecutive verdicts inspected
+  min_overlap_ratio: 0.5   # Jaccard overlap across recent verdict.issues_key sets triggering escalation
+  window: 3                # number of consecutive verdicts inspected; 3 avoids tripping on a single repeated issue within the MINOR loop cap (=3)
 
 review:
   sub_agents: []           # future: ["api-critic", "test-skeptic", "doc-reviewer"]

@@ -11,6 +11,7 @@
 - `uv`, `pytest`, `mypy --strict`, `ruff`, `src/` 레이아웃, Google docstring, `hatchling` — 이 모두는 **생성 대상 라이브러리**에 적용되는 규약이다. 이 레포 자체에 적용하지 말 것.
 - 이 레포의 파이썬 코드(`scripts/*.py`)는 stdlib + `PyYAML`만 쓰는 얇은 오케스트레이션 계층이다. 의존성 추가 전에 반드시 정당화하라.
 - 루트에 `pyproject.toml`, `src/`, `tests/`를 만들지 말 것. 그건 이 레포를 "또 하나의 라이브러리"로 잘못 취급하는 신호다.
+- **harness-builder SKILL.md 단계 0 의 다섯 축** (컨텍스트 파일·결정론적 게이트·도구 경계·in-run 피드백 루프·자기교정 경계) 은 이 하네스에 모두 구현되어 있다. 만약 미래에 어떤 축을 의도적으로 생략·완화하게 된다면 **그 사유를 이 `CLAUDE.md` 에 명시 기록**해야 한다 (SKILL 원칙). 현재는 생략 축 없음.
 
 ## 2. Placeholder 정책 (최우선 규약, 실수하면 배포가 깨짐)
 
@@ -53,6 +54,9 @@
 | 설치/제거 동작 | `install.sh` / `uninstall.sh` |
 | Preflight 검사 항목 | `scripts/preflight.py` (독립 파일, Amendment A3) |
 | `state.json` 초기 스키마 | `scripts/init_run.py` |
+| 기계 게이트 실행 (pytest/mypy/ruff/coverage) | `scripts/gates.py` (Amendment A7, 0-2 clean separation) |
+| Stage별 헤드리스 도구 권한 | `scripts/run.py` 상단 `STAGE_TOOLS` 맵 (0-3) |
+| Run 간 증거 축적 (`.index.jsonl`, 에스컬레이션 과거 맥락) | `scripts/run.py` `append_index_entry` / `format_cross_run_pattern_block` (0-5) |
 
 **두 곳 동기화** 항목: skill과 docs가 중복 기재되는 이유는 skill이 사용자 지시용, docs가 참조 저장소용이기 때문. 한쪽만 고치면 drift가 난다.
 

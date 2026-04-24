@@ -20,6 +20,7 @@ state.json says `current_stage` points, and stops on any user-facing gate.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import shutil
@@ -56,6 +57,88 @@ def load_config() -> dict[str, Any]:
     return yaml.safe_load(CONFIG_PATH.read_text())
 
 
+# ---------- cross-run evidence (0-5) ----------
+
+def append_index_entry(state: dict[str, Any], final_status: str, escalation_trigger: str | None = None) -> None:
+    """Append one line to outputs/.index.jsonl with this run's outcome.
+
+    See harness-builder SKILL.md §0-5: cross-run pattern accumulation is the
+    evidence layer that lets a human (not the harness) patch prompts/caps.
+    """
+    index_path = HARNESS_ROOT / "outputs" / ".index.jsonl"
+    index_path.parent.mkdir(exist_ok=True)
+    entry = {
+        "run_id": state["run_id"],
+        "mode": state.get("mode"),
+        "final_status": final_status,
+        "counters": state.get("counters", {}),
+        "escalation_trigger": escalation_trigger,
+        "completed_at": dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    with index_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def read_recent_index_entries(limit: int = 10) -> list[dict[str, Any]]:
+    """Return the last `limit` entries from outputs/.index.jsonl, newest last.
+
+    Malformed lines are skipped silently — the index is advisory evidence, not
+    load-bearing state. Absence of the file (first-ever run) returns [].
+    """
+    index_path = HARNESS_ROOT / "outputs" / ".index.jsonl"
+    if not index_path.exists():
+        return []
+    entries: list[dict[str, Any]] = []
+    for line in index_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries[-limit:]
+
+
+def format_cross_run_pattern_block(current_run_id: str, limit: int = 10) -> str:
+    """Build a markdown block summarizing recent run outcomes for escalation.md.
+
+    Shows the last N runs (excluding the current run) with their final_status
+    and escalation_trigger counts, so the user can spot repeated failure modes
+    before deciding how to patch prompts/caps.
+    """
+    # In the current call order, `escalate()` calls this *before*
+    # `append_index_entry`, so the current run is never in the index yet and
+    # the filter is a no-op today. Kept as a guard in case a future caller
+    # reorders those calls (e.g. writing an index entry at stage boundaries).
+    entries = [e for e in read_recent_index_entries(limit=limit)
+               if e.get("run_id") != current_run_id]
+    if not entries:
+        return "_no prior runs indexed — this is the first recorded run._\n"
+
+    trigger_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {}
+    for e in entries:
+        status = e.get("final_status") or "unknown"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        trig = e.get("escalation_trigger")
+        if trig:
+            trigger_counts[trig] = trigger_counts.get(trig, 0) + 1
+
+    lines = [f"Looking at the previous {len(entries)} run(s) (newest last):", ""]
+    for e in entries:
+        lines.append(
+            f"- `{e.get('run_id', '?')}` ({e.get('mode', '?')}) → "
+            f"{e.get('final_status', '?')}"
+            + (f" [trigger: {e.get('escalation_trigger')}]" if e.get("escalation_trigger") else "")
+        )
+    lines.append("")
+    lines.append("**Status counts:** " + ", ".join(f"{k}={v}" for k, v in status_counts.items()))
+    if trigger_counts:
+        lines.append("**Escalation triggers:** " + ", ".join(f"{k}={v}" for k, v in trigger_counts.items()))
+    return "\n".join(lines) + "\n"
+
+
 # ---------- gates ----------
 
 def gate_pending(run_dir: Path, gate: str) -> bool:
@@ -65,19 +148,27 @@ def gate_pending(run_dir: Path, gate: str) -> bool:
 
 
 def write_gate_request(run_dir: Path, gate: str, title: str, context: str, options: str) -> None:
-    body = textwrap.dedent(f"""\
-        # Gate: {title}
-
-        ## Context
-
-        {context}
-
-        ## Expected decision
-
-        Write `{gate}.decision.md` next to this file with one of:
-
-        {options}
-    """)
+    # Deliberately no textwrap.dedent + f-string indentation: interpolated multi-line
+    # values (options, JSON, etc.) include flush-left lines that force the common
+    # leading-whitespace prefix to 0, defeating dedent and leaving the surrounding
+    # literal lines with 4+ spaces of indent — which Markdown renders as a code
+    # block, breaking headers and the decision snippet. Keep triple-quoted content
+    # flush-left in source so the file on disk is real Markdown.
+    body = (
+        f"# Gate: {title}\n"
+        f"\n"
+        f"## Context\n"
+        f"\n"
+        f"{context}\n"
+        f"\n"
+        f"## Expected decision\n"
+        f"\n"
+        f"Write `{gate}.decision.md` next to this file with one of:\n"
+        f"\n"
+        f"```\n"
+        f"{options.rstrip()}\n"
+        f"```\n"
+    )
     (run_dir / f"{gate}.request.md").write_text(body)
 
 
@@ -100,13 +191,21 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
             key = key.strip()
             rest = rest.strip()
             if rest == "|":
+                # YAML-style block: consume subsequent lines that are either
+                # indented (2+ spaces or tab) or blank. Preserve relative
+                # indentation by collecting raw lines and running textwrap.dedent
+                # at the end — avoids flattening code snippets that the user
+                # pastes into feedback.
                 buf: list[str] = []
                 i += 1
-                while i < len(lines) and (lines[i].startswith("  ") or lines[i].startswith("\t") or not lines[i].strip()):
-                    if lines[i].strip():
-                        buf.append(lines[i].lstrip())
-                    i += 1
-                result[key] = "\n".join(buf).strip()
+                while i < len(lines):
+                    raw = lines[i]
+                    if raw.startswith("  ") or raw.startswith("\t") or not raw.strip():
+                        buf.append(raw)
+                        i += 1
+                    else:
+                        break
+                result[key] = textwrap.dedent("\n".join(buf)).strip()
                 continue
             else:
                 result[key] = rest
@@ -115,6 +214,37 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
 
 
 # ---------- headless invocation ----------
+
+# Stage-level tool allowlists (harness-builder SKILL.md §0-3).
+# Structural enforcement of tool boundaries: s0/s5 are read-only investigators
+# by design, other stages get progressively wider access. Unmapped stages fall
+# back to unrestricted (no flag passed) — add an entry if you introduce a new
+# stage rather than silently inheriting full access.
+STAGE_TOOLS: dict[str, str] = {
+    # Survey: read-only codebase investigator. Must not mutate target_repo_path.
+    "s0_survey":    "Read,Grep,Glob,Bash(rg *),Bash(grep *),Bash(find *),Bash(head *),Bash(cat *),Bash(ls *),Bash(tree *),Bash(wc *),Bash(git log *),Bash(git show *),Bash(git diff *),Bash(git status *)",
+    # Plan / design: write planning artifacts into run_dir. No code execution needed.
+    "s1_plan":      "Read,Grep,Glob,Write,Edit",
+    "s2_design":    "Read,Grep,Glob,Write,Edit",
+    # Tests: scaffold uv workspace (new mode) + write test files. No git commits.
+    # `uv` narrowed to non-publishing subcommands (no `uv publish`, no `uv build`).
+    "s3_tests":     "Read,Grep,Glob,Write,Edit,Bash(uv init *),Bash(uv add *),Bash(uv sync *),Bash(uv lock *),Bash(uv run *),Bash(mkdir *),Bash(ls *),Bash(cat *),Bash(cp *)",
+    # Implementation: uv run loop + git commits on harness branch (evolve).
+    # `uv` narrowed same as s3 (no publish/build). Git narrowed to non-destructive
+    # subcommands (no reset/clean/push/rebase/branch). Both bare (`git <sub>`) and
+    # `git -C <path> <sub>` forms are allowed — the s4 prompt uses -C to target
+    # {target_repo_path} for patch generation (diff/merge-base/rev-parse).
+    "s4_implement": "Read,Grep,Glob,Write,Edit,Bash(uv init *),Bash(uv add *),Bash(uv sync *),Bash(uv lock *),Bash(uv run *),Bash(git add *),Bash(git commit *),Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git merge-base *),Bash(git rev-parse *),Bash(git -C * add *),Bash(git -C * commit *),Bash(git -C * status *),Bash(git -C * diff *),Bash(git -C * log *),Bash(git -C * show *),Bash(git -C * merge-base *),Bash(git -C * rev-parse *),Bash(mkdir *),Bash(ls *),Bash(cat *),Bash(cp *),Bash(mv *)",
+    # Independent review: writes review.md/verdict.yaml. Reads gates/*.json for
+    # mechanical results — does not execute them itself (0-2 clean separation).
+    # No Edit (must not modify source under review), no Bash(uv run *) (gates
+    # are authoritative). Git read-only for inspecting evolve diffs.
+    "s5_review":    "Read,Grep,Glob,Write,Bash(git log *),Bash(git diff *),Bash(git show *),Bash(git status *)",
+    # Docs: writes documentation, may run uv to verify snippets compile.
+    # Needs `git -C <target_repo_path> diff` for the evolve-mode docs-diff.patch.
+    "s7_docs":      "Read,Grep,Glob,Write,Edit,Bash(uv run *),Bash(git diff *),Bash(git -C * diff *)",
+}
+
 
 def call_headless(stage: str, run_dir: Path, extra: str = "") -> int:
     template_path = PROMPTS_DIR / f"{stage}.md"
@@ -164,10 +294,18 @@ def call_headless(stage: str, run_dir: Path, extra: str = "") -> int:
         (for example: `{stage.upper()}_DONE: <path>`). Do not emit anything after that line.
     """)
 
-    # Non-interactive; assumes the user runs claude with appropriate permissions.
-    # Using --print to keep output capturable; the actual work is file-based.
-    cmd = ["claude", "-p", wrapper]
-    print(f"[run.py] invoking headless for stage={stage}", file=sys.stderr)
+    # Non-interactive headless call. Two flags enforce 0-3 (tool boundary):
+    #   --allowed-tools : structural whitelist of tools this stage may use.
+    #   --permission-mode acceptEdits : auto-accept Edit/Write without prompting
+    #     (required for -p mode; Bash is already gated by the allowlist patterns).
+    # Stages missing from STAGE_TOOLS fall back to unrestricted tool access — add
+    # an explicit entry when introducing a new stage rather than inheriting full
+    # access silently.
+    cmd = ["claude", "-p", wrapper, "--permission-mode", "acceptEdits"]
+    allowed = STAGE_TOOLS.get(stage)
+    if allowed is not None:
+        cmd.extend(["--allowed-tools", allowed])
+    print(f"[run.py] invoking headless for stage={stage} (tools={'restricted' if allowed else 'unrestricted'})", file=sys.stderr)
     r = subprocess.run(cmd, check=False)
     return r.returncode
 
@@ -203,12 +341,27 @@ def stage_preflight(run_dir: Path, state: dict[str, Any]) -> bool:
     # evolve: create harness branch (default naming or user-chosen)
     if state["mode"] == "evolve":
         branch = state.get("branch_name") or f"harness/{state['run_id']}"
-        subprocess.run(
-            ["git", "-C", state["target_repo_path"], "checkout", "-b", branch],
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["git", "-C", state["target_repo_path"], "checkout", "-b", branch],
+                check=True, capture_output=True, text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(
+                f"error: failed to create branch '{branch}' in {state['target_repo_path']}:\n"
+                f"  {(e.stderr or e.stdout or '').strip()}\n"
+                f"  hint: branch may already exist; delete it or choose a different branch_name "
+                f"in interview/mode.json and rerun.",
+                file=sys.stderr,
+            )
+            return False
         state["branch_name"] = branch
     state["preflight_done"] = True
+    # Advance out of the initial "di" sentinel (set by init_run.py). s0 is
+    # self-skipping for new mode (handled in main loop), so this single value
+    # works for both modes.
+    if state.get("current_stage") == "di":
+        state["current_stage"] = "s0"
     save_state(run_dir, state)
     return True
 
@@ -237,20 +390,20 @@ def stage_headless_with_gate(
     if decision is None:
         if not (run_dir / f"{gate}.request.md").exists():
             context = f"Review `{output_marker.relative_to(run_dir)}` under `{run_dir}`."
-            options = textwrap.dedent("""\
-                    decision: approved
-                    # or
-                    decision: rewrite
-                    feedback: |
-                      <what to fix>
-            """)
+            options = (
+                "decision: approved\n"
+                "# or\n"
+                "decision: rewrite\n"
+                "feedback: |\n"
+                "  <what to fix>\n"
+            )
             if gate == "gateB" and state["mode"] == "evolve":
-                options += textwrap.dedent("""\
-                    # or (evolve only; breaking change acknowledged)
-                    decision: approved_with_breaking
-                    breaking_notes: |
-                      <which public APIs break, migration strategy>
-                """)
+                options += (
+                    "# or (evolve only; breaking change acknowledged)\n"
+                    "decision: approved_with_breaking\n"
+                    "breaking_notes: |\n"
+                    "  <which public APIs break, migration strategy>\n"
+                )
             write_gate_request(run_dir, gate, title, context, options)
         print(f"[run.py] paused at {gate}. Write {gate}.decision.md and rerun with --resume.", file=sys.stderr)
         sys.exit(0)
@@ -277,7 +430,94 @@ def stage_headless_with_gate(
         sys.exit(1)
 
 
-def stage_s5_review(run_dir: Path, state: dict[str, Any]) -> None:
+def effective_thresholds(state: dict[str, Any], cfg: dict[str, Any]) -> dict[str, float | int]:
+    """Resolve thresholds: config.yaml defaults + mode.json.overrides.
+
+    Override keys match config keys exactly (line_coverage, branch_coverage,
+    max_major_issues_new, max_major_issues_evolve); a null override means
+    "use the default". Returning all four lets the orchestrator both feed
+    gates.py (line/branch) and hand s5 a resolved policy snapshot
+    (max_major) instead of making the LLM re-derive overrides.
+    """
+    base = cfg.get("thresholds", {}) or {}
+    ov = state.get("overrides") or {}
+    def pick(key: str, fallback: float | int) -> float | int:
+        v = ov.get(key)
+        if v is None:
+            v = base.get(key, fallback)
+        return v
+    return {
+        "line_coverage": float(pick("line_coverage", 0.90)),
+        "branch_coverage": float(pick("branch_coverage", 0.80)),
+        "max_major_issues_new": int(pick("max_major_issues_new", 0)),
+        "max_major_issues_evolve": int(pick("max_major_issues_evolve", 2)),
+    }
+
+
+def write_effective_thresholds(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -> None:
+    """Dump the fully-resolved policy snapshot to {run_dir}/effective_thresholds.json.
+
+    s5 reads this file as authoritative (0-2): thresholds live in config.yaml,
+    overrides in state.json, the reader LLM shouldn't have to join them. Also
+    records the mode + the resolved `max_major_issues` relevant to this run
+    so the reviewer can compare against its own issue counts directly.
+    """
+    th = effective_thresholds(state, cfg)
+    mode = state["mode"]
+    resolved = {
+        "mode": mode,
+        "line_coverage": th["line_coverage"],
+        "branch_coverage": th["branch_coverage"],
+        "max_major_issues_new": th["max_major_issues_new"],
+        "max_major_issues_evolve": th["max_major_issues_evolve"],
+        "max_major_issues_applicable": (
+            th["max_major_issues_new"] if mode == "new" else th["max_major_issues_evolve"]
+        ),
+    }
+    (run_dir / "effective_thresholds.json").write_text(json.dumps(resolved, indent=2))
+
+
+def run_gates(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -> int:
+    """Execute mechanical hard gates directly (0-2 clean separation).
+
+    Writes authoritative results to {run_dir}/gates/*.json. The s5 headless
+    reads these files as inputs — LLM never claims mechanical facts it can't
+    own. Returns gates.py's exit code (0=all pass, 1=some failed, 2=error).
+    """
+    if state["mode"] == "new":
+        source_dir = run_dir / "workspace"
+    else:
+        source_dir = Path(state["target_repo_path"])
+    th = effective_thresholds(state, cfg)
+    cmd = [
+        sys.executable, str(SCRIPTS_DIR / "gates.py"),
+        "--run-dir", str(run_dir),
+        "--source-dir", str(source_dir),
+        "--lib-name", state.get("lib_name") or "",
+        "--line-threshold", str(th["line_coverage"]),
+        "--branch-threshold", str(th["branch_coverage"]),
+    ]
+    print(f"[run.py] running mechanical gates in {source_dir} "
+          f"(line≥{th['line_coverage']}, branch≥{th['branch_coverage']})", file=sys.stderr)
+    r = subprocess.run(cmd, check=False)
+    return r.returncode
+
+
+def stage_s5_review(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -> None:
+    # 0-2: orchestrator runs mechanical gates before *every* s5 invocation.
+    # Re-running on loopbacks matters — `clear_stage_outputs` does not wipe
+    # `gates/`, so a cached summary.json would otherwise describe the
+    # previous s4 attempt. We pay for an extra uv run on resume-after-crash
+    # and accept that cost in exchange for correctness on MINOR/MAJOR loops.
+    # Resolved policy (config + overrides) goes to effective_thresholds.json
+    # so s5 doesn't have to re-derive max_major / coverage thresholds.
+    write_effective_thresholds(run_dir, state, cfg)
+    rc = run_gates(run_dir, state, cfg)
+    if rc == 2:
+        print("[run.py] gates.py errored (rc=2). Fix toolchain and resume.", file=sys.stderr)
+        sys.exit(2)
+    # rc 0 (pass) or 1 (some failed) both mean gates ran; s5 will read results.
+
     verdict_path = run_dir / "s5" / "verdict.yaml"
     if not verdict_path.exists():
         rc = call_headless("s5_review", run_dir)
@@ -295,7 +535,21 @@ def load_verdict(run_dir: Path) -> dict[str, Any]:
 
 
 def issues_key(verdict: dict[str, Any]) -> list[str]:
-    return sorted(f"{i.get('file', '?')}:{i.get('severity', '?')}" for i in verdict.get("issues", []))
+    """Stable keys for comparing issue sets across verdicts.
+
+    `file:severity` alone conflates distinct issues that happen to live in the
+    same file at the same severity (common for "two major issues in core.py"),
+    which under-counts them in `compute_update_candidates` and under-detects
+    stagnation overlap. Including the first few words of the description
+    discriminates without making the key brittle to minor wording edits.
+    """
+    def _key(issue: dict[str, Any]) -> str:
+        file = issue.get("file", "?")
+        sev = issue.get("severity", "?")
+        desc = (issue.get("description", "") or "").strip()
+        desc_head = " ".join(desc.split()[:5])
+        return f"{file}:{sev}:{desc_head}" if desc_head else f"{file}:{sev}"
+    return sorted(_key(i) for i in verdict.get("issues", []))
 
 
 def stagnation_triggered(history: list[dict[str, Any]], cfg: dict[str, Any]) -> bool:
@@ -320,6 +574,15 @@ def stage_s6_decide(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
         "issues_key": issues_key(verdict),
     })
 
+    # 0-2 guard: mechanical gates are authoritative. If python found failures
+    # but the LLM wrote PASS, the LLM either didn't read the gate results or
+    # hallucinated. Either way, the run is untrustworthy — escalate.
+    gates_summary_path = run_dir / "gates" / "summary.json"
+    if gates_summary_path.exists():
+        gates_summary = json.loads(gates_summary_path.read_text())
+        if not gates_summary.get("all_passed", True) and verdict["verdict"] == "PASS":
+            return escalate(run_dir, state, "llm_pass_despite_failing_gates", verdict)
+
     # stagnation
     if stagnation_triggered(state["verdict_history"], cfg):
         return escalate(run_dir, state, "stagnation", verdict)
@@ -342,7 +605,11 @@ def stage_s6_decide(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
         if counters["minor_loop"] >= caps["minor_loop"]:
             return escalate(run_dir, state, "cap_minor_loop", verdict)
         counters["minor_loop"] += 1
-        clear_stage_outputs(run_dir, ["s4", "s5"])
+        preserve_loop_feedback(run_dir, "s4_implement")
+        # Clear s4/s5 outputs *and* gates — stage_s5_review re-runs gates
+        # unconditionally, but leaving a stale summary.json around invites
+        # confusion if a reviewer inspects run_dir mid-loop.
+        clear_stage_outputs(run_dir, ["s4", "s5", "gates"])
         (run_dir / "s6").mkdir(exist_ok=True)
         (run_dir / "s6" / "decision.json").write_text(json.dumps({"action": "loop", "target": "s4"}, indent=2))
         save_state(run_dir, state)
@@ -352,7 +619,8 @@ def stage_s6_decide(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
             return escalate(run_dir, state, "cap_major_loop", verdict)
         counters["major_loop"] += 1
         counters["minor_loop"] = 0
-        clear_stage_outputs(run_dir, ["s2", "s3", "s4", "s5"])
+        preserve_loop_feedback(run_dir, "s2_design")
+        clear_stage_outputs(run_dir, ["s2", "s3", "s4", "s5", "gates"])
         # gateB must be reopened
         for f in ("gateB.request.md", "gateB.decision.md"):
             (run_dir / f).unlink(missing_ok=True)
@@ -372,48 +640,96 @@ def clear_stage_outputs(run_dir: Path, stages: list[str]) -> None:
             shutil.rmtree(d)
 
 
+def preserve_loop_feedback(run_dir: Path, loop_stage: str) -> None:
+    """Write s5/review.md + verdict.yaml to {run_dir}/{loop_stage}/feedback.md
+    before the upcoming clear_stage_outputs wipes s5.
+
+    Harness-builder SKILL §0-4: the looped-back stage must receive "why the
+    last attempt failed" as input. Without this, MINOR/MAJOR loops re-run
+    blind because s5 is cleared alongside s4.
+
+    `loop_stage` is the headless stage name (e.g. "s4_implement",
+    "s2_design") — matches the gate-rewrite convention in
+    stage_headless_with_gate so each stage has one feedback.md path.
+    """
+    review = run_dir / "s5" / "review.md"
+    verdict = run_dir / "s5" / "verdict.yaml"
+    if not review.exists() and not verdict.exists():
+        return
+    target_dir = run_dir / loop_stage
+    target_dir.mkdir(exist_ok=True)
+    parts = [f"# Feedback from prior s5 review (loop into {loop_stage})\n"]
+    if verdict.exists():
+        parts.append("## verdict.yaml\n\n```yaml\n" + verdict.read_text() + "\n```\n")
+    if review.exists():
+        parts.append("## review.md\n\n" + review.read_text() + "\n")
+    (target_dir / "feedback.md").write_text("\n".join(parts))
+
+
 def escalate(run_dir: Path, state: dict[str, Any], trigger: str, verdict: dict[str, Any]) -> str:
     path = run_dir / "escalation.md"
     last_two = state["verdict_history"][-2:]
-    body = textwrap.dedent(f"""\
-        # Escalation
-
-        ## Trigger
-        {trigger}
-
-        ## Current state
-        - current_stage: {state.get('current_stage')}
-        - counters: {json.dumps(state['counters'])}
-        - mode: {state['mode']}
-
-        ## Latest verdict
-        ```yaml
-        {(run_dir / 's5' / 'verdict.yaml').read_text() if (run_dir / 's5' / 'verdict.yaml').exists() else '(not found)'}
-        ```
-
-        ## Recent verdict history (up to last 2)
-        ```json
-        {json.dumps(last_two, indent=2)}
-        ```
-
-        ## Expected user decision
-
-        Write `escalation.decision.md` next to this file:
-
-            action: abort
-            # or
-            action: resume_from_plan
-            feedback: |
-              <what was wrong>
-            # or
-            action: resume_from_design
-            feedback: |
-              <...>
-            # or
-            action: force_continue
-            reset_counters: [minor_loop, major_loop]
-    """)
+    pattern_block = format_cross_run_pattern_block(current_run_id=state["run_id"], limit=10)
+    gates_summary_path = run_dir / "gates" / "summary.json"
+    gates_block = (
+        gates_summary_path.read_text() if gates_summary_path.exists() else "(not available — gates not yet run this cycle)"
+    )
+    verdict_yaml = (run_dir / "s5" / "verdict.yaml").read_text() if (run_dir / "s5" / "verdict.yaml").exists() else "(not found)"
+    # Flush-left triple-quoting avoids the textwrap.dedent trap (see write_gate_request).
+    body = (
+        f"# Escalation\n"
+        f"\n"
+        f"## Trigger\n"
+        f"{trigger}\n"
+        f"\n"
+        f"## Current state\n"
+        f"- current_stage: {state.get('current_stage')}\n"
+        f"- counters: {json.dumps(state['counters'])}\n"
+        f"- mode: {state['mode']}\n"
+        f"\n"
+        f"## Mechanical gates (python-authoritative, 0-2)\n"
+        f"```json\n"
+        f"{gates_block.rstrip()}\n"
+        f"```\n"
+        f"\n"
+        f"## LLM verdict (judgment, 0-2)\n"
+        f"```yaml\n"
+        f"{verdict_yaml.rstrip()}\n"
+        f"```\n"
+        f"\n"
+        f"## Recent verdict history (up to last 2)\n"
+        f"```json\n"
+        f"{json.dumps(last_two, indent=2)}\n"
+        f"```\n"
+        f"\n"
+        f"## Cross-run context (prior runs, 0-5 evidence)\n"
+        f"{pattern_block.rstrip()}\n"
+        f"\n"
+        f"## Expected user decision\n"
+        f"\n"
+        f"Write `escalation.decision.md` next to this file:\n"
+        f"\n"
+        f"```\n"
+        f"action: abort\n"
+        f"# or\n"
+        f"action: resume_from_plan\n"
+        f"feedback: |\n"
+        f"  <what was wrong>\n"
+        f"# or\n"
+        f"action: resume_from_design\n"
+        f"feedback: |\n"
+        f"  <...>\n"
+        f"# or\n"
+        f"action: force_continue\n"
+        f"reset_counters: [minor_loop, major_loop]\n"
+        f"```\n"
+    )
     path.write_text(body)
+    # Remember the trigger so the final index entry (written on PASS/abort) can
+    # record it. Previously we appended an "escalated" row here and another
+    # "<final_verdict>" row later, double-counting the same run in cross-run
+    # stats. Now we record exactly one entry per run at its terminal state.
+    state["last_escalation_trigger"] = trigger
     save_state(run_dir, state)
     print(f"[run.py] escalation written to {path}. Resolve and rerun with --resume.", file=sys.stderr)
     sys.exit(2)
@@ -428,18 +744,39 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
         return None
     action = dec.get("action", "").strip()
     if action == "abort":
+        # Terminal state: record one-and-only-one index entry for this run.
+        append_index_entry(
+            state,
+            final_status="aborted",
+            escalation_trigger=state.get("last_escalation_trigger"),
+        )
         print("[run.py] run aborted by user.", file=sys.stderr)
         sys.exit(0)
     if action == "resume_from_plan":
-        clear_stage_outputs(run_dir, ["s1", "s2", "s3", "s4", "s5", "s6"])
+        # Also clear stage-feedback directories (s0_survey, s1_plan, s2_design,
+        # s4_implement) — these hold rewrite/loop feedback written by prior
+        # stage runs. Carrying them into a fresh plan-resume would feed stale
+        # "here's what went wrong last time" context into stages that are now
+        # answering a different question.
+        clear_stage_outputs(run_dir, [
+            "s1", "s2", "s3", "s4", "s5", "s6",
+            "s0_survey", "s1_plan", "s2_design", "s4_implement",
+        ])
         for f in ("gateA.request.md", "gateA.decision.md", "gateB.request.md", "gateB.decision.md"):
             (run_dir / f).unlink(missing_ok=True)
         state["gate_decisions"]["gateA"] = None
         state["gate_decisions"]["gateB"] = None
-        state["counters"] = {"impl_retry": 0, "minor_loop": 0, "major_loop": 0, "total_stages": state["counters"]["total_stages"]}
+        state["counters"] = {"minor_loop": 0, "major_loop": 0, "total_stages": state["counters"]["total_stages"]}
+        # Fresh plan means the prior review cycle is no longer representative;
+        # keeping its issues in verdict_history would let stagnation detection
+        # trip on pre-escalation evidence that no longer reflects the new plan.
+        state["verdict_history"] = []
         next_stage = "s1"
     elif action == "resume_from_design":
-        clear_stage_outputs(run_dir, ["s2", "s3", "s4", "s5", "s6"])
+        clear_stage_outputs(run_dir, [
+            "s2", "s3", "s4", "s5", "s6",
+            "s2_design", "s4_implement",
+        ])
         for f in ("gateB.request.md", "gateB.decision.md"):
             (run_dir / f).unlink(missing_ok=True)
         state["gate_decisions"]["gateB"] = None
@@ -451,6 +788,13 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
             c = c.strip()
             if c in state["counters"]:
                 state["counters"][c] = 0
+        # force_continue routes us back to s6, which re-reads the same verdict
+        # and would append it to verdict_history a second time (inflating the
+        # stagnation window). Pop the last entry so the re-append nets zero.
+        # The user is responsible for resetting the counter that triggered the
+        # escalation — otherwise s6 will re-escalate on the same cap.
+        if state.get("verdict_history"):
+            state["verdict_history"].pop()
         next_stage = state.get("current_stage") or "s5"
     else:
         print(f"error: unknown escalation action: {action}", file=sys.stderr)
@@ -470,7 +814,10 @@ STAGE_OUTPUT_MARKERS: dict[str, str] = {
     "s2": "s2/design.md",
     "s3": "s3/test-manifest.md",
     "s4": "s4/impl-notes.md",
-    "s7": "s7/docs-diff.patch",  # evolve; new: workspace/README.md exists too
+    # s7 writes multiple artifacts (README/docs/CHANGELOG in new mode,
+    # docs-diff.patch in evolve mode); docs-done.marker is the single
+    # completion signal both modes emit and is what main()'s s7 branch checks.
+    "s7": "s7/docs-done.marker",
 }
 
 
@@ -566,7 +913,7 @@ def main() -> int:
             continue
 
         if stage == "s5":
-            stage_s5_review(run_dir, state)
+            stage_s5_review(run_dir, state, cfg)
             save_state(run_dir, state)
             state["current_stage"] = "s6"
             save_state(run_dir, state)
@@ -592,15 +939,34 @@ def main() -> int:
             write_delivery(run_dir, state, cfg)
             state["current_stage"] = "done"
             save_state(run_dir, state)
-            print(f"[run.py] DELIVERY.md written. Run complete: {run_dir}/DELIVERY.md")
+            print(f"[run.py] delivery.md written. Run complete: {run_dir}/delivery.md")
             return 0
 
         if stage == "done":
-            print(f"[run.py] run already complete: {run_dir}/DELIVERY.md")
+            print(f"[run.py] run already complete: {run_dir}/delivery.md")
             return 0
 
         print(f"error: unknown stage: {stage}", file=sys.stderr)
         return 1
+
+
+def compute_update_candidates(state: dict[str, Any]) -> list[tuple[str, int]]:
+    """Return (file:severity, count) pairs that reviewer flagged across ≥2 loops.
+
+    These are *candidates* for promotion into docs/tacit-knowledge.md or a stage
+    prompt — repeated failure patterns that the harness itself couldn't learn
+    from (by design; SKILL §0-5 forbids self-modification). A human reviews
+    this list and decides what to promote.
+    """
+    from collections import Counter
+    history = state.get("verdict_history", [])
+    if len(history) <= 1:
+        return []
+    counts: Counter[str] = Counter()
+    for entry in history:
+        for key in entry.get("issues_key", []):
+            counts[key] += 1
+    return [(k, v) for k, v in counts.most_common() if v >= 2]
 
 
 def write_delivery(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -> None:
@@ -609,47 +975,86 @@ def write_delivery(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) ->
     mode = state["mode"]
     lib_name = state.get("lib_name") or "<unknown>"
 
-    next_actions_new = textwrap.dedent(f"""\
-        - Review `outputs/{state['run_id']}/workspace/`.
-        - Move the workspace to your desired location (git init or drop into an existing mono-repo).
-        - Set up remote, tag, and publish with `uv publish` when ready.
-    """)
-    next_actions_evolve = textwrap.dedent(f"""\
-        - Review the branch `{state.get('branch_name')}` in `{state.get('target_repo_path')}`.
-        - Inspect `outputs/{state['run_id']}/s4/changes.patch` for the exact diff.
-        - Open a PR or merge into your integration branch per your team's process.
-    """)
+    next_actions_new = (
+        f"- Review `outputs/{state['run_id']}/workspace/`.\n"
+        f"- Move the workspace to your desired location (git init or drop into an existing mono-repo).\n"
+        f"- Set up remote, tag, and publish with `uv publish` when ready.\n"
+    )
+    next_actions_evolve = (
+        f"- Review the branch `{state.get('branch_name')}` in `{state.get('target_repo_path')}`.\n"
+        f"- Inspect `outputs/{state['run_id']}/s4/changes.patch` for the exact diff.\n"
+        f"- Open a PR or merge into your integration branch per your team's process.\n"
+    )
 
-    body = textwrap.dedent(f"""\
-        # DELIVERY — {lib_name} ({mode})
+    gates_summary = (run_dir / "gates" / "summary.json").read_text() if (run_dir / "gates" / "summary.json").exists() else "(missing)"
+    verdict_yaml_text = verdict_path.read_text() if verdict_path.exists() else "(missing)"
+    next_actions = next_actions_new if mode == "new" else next_actions_evolve
 
-        Run: `{state['run_id']}`
-        Completed: {state.get('created_at')}
-        Mode: **{mode}**
+    # Flush-left triple-quoting avoids the textwrap.dedent trap (see write_gate_request).
+    body = (
+        f"# DELIVERY — {lib_name} ({mode})\n"
+        f"\n"
+        f"Run: `{state['run_id']}`\n"
+        f"Completed: {state.get('created_at')}\n"
+        f"Mode: **{mode}**\n"
+        f"\n"
+        f"## Gate decisions\n"
+        f"```json\n"
+        f"{json.dumps(state.get('gate_decisions', {}), indent=2)}\n"
+        f"```\n"
+        f"\n"
+        f"## Loop counters (final)\n"
+        f"```json\n"
+        f"{json.dumps(state.get('counters', {}), indent=2)}\n"
+        f"```\n"
+        f"\n"
+        f"## Mechanical gates (python-authoritative, 0-2)\n"
+        f"```json\n"
+        f"{gates_summary.rstrip()}\n"
+        f"```\n"
+        f"\n"
+        f"## LLM verdict (judgment, 0-2)\n"
+        f"```yaml\n"
+        f"{verdict_yaml_text.rstrip()}\n"
+        f"```\n"
+        f"\n"
+        f"## Next actions\n"
+        f"{next_actions.rstrip()}\n"
+        f"\n"
+        f"## Known limits\n"
+        f"- See `s5/review.md` for remaining minor notes.\n"
+        f"- Thresholds applied: {json.dumps(cfg.get('thresholds', {}))}.\n"
+    )
 
-        ## Gate decisions
-        ```json
-        {json.dumps(state.get('gate_decisions', {}), indent=2)}
-        ```
+    # §0-5: delivery.md의 "암묵지 업데이트 후보" 섹션. 반복 지적된 패턴만
+    # 제안으로 싣는다. tacit-knowledge.md / 프롬프트 수정은 사람이 결정.
+    candidates = compute_update_candidates(state)
+    if candidates:
+        lines = [f"- `{key}` — reviewer flagged {n}× across loops" for key, n in candidates]
+        candidates_md = "\n".join(lines)
+    else:
+        candidates_md = "_no issue repeated across loops — nothing to promote._"
+    body += (
+        f"\n"
+        f"## 암묵지 업데이트 후보 (SKILL §0-5)\n"
+        f"\n"
+        f"리뷰에서 반복된 패턴. 사람이 검토해 필요하면 `docs/tacit-knowledge.md` 또는\n"
+        f"해당 stage 프롬프트에 영구 규약으로 반영할 후보다. **하네스는 자동 수정하지\n"
+        f"않는다.**\n"
+        f"\n"
+        f"{candidates_md}\n"
+    )
 
-        ## Loop counters (final)
-        ```json
-        {json.dumps(state.get('counters', {}), indent=2)}
-        ```
-
-        ## Final verdict
-        ```yaml
-        {verdict_path.read_text() if verdict_path.exists() else '(missing)'}
-        ```
-
-        ## Next actions
-        {next_actions_new if mode == 'new' else next_actions_evolve}
-
-        ## Known limits
-        - See `s5/review.md` for remaining minor notes.
-        - Thresholds applied: {json.dumps(cfg.get('thresholds', {}))}.
-    """)
-    (run_dir / "DELIVERY.md").write_text(body)
+    (run_dir / "delivery.md").write_text(body)
+    final_status = verdict.get("verdict", "UNKNOWN") if verdict else "UNKNOWN"
+    # Single terminal index entry per run. `last_escalation_trigger` is set by
+    # escalate() and persists across the escalation resolution; if this run
+    # never escalated, it's simply None.
+    append_index_entry(
+        state,
+        final_status=final_status,
+        escalation_trigger=state.get("last_escalation_trigger"),
+    )
 
 
 if __name__ == "__main__":

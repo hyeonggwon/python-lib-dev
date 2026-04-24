@@ -12,7 +12,7 @@ Turn the approved plan into a concrete design: public API shape, module breakdow
 2. `{run_dir}/interview/mode.json`
 3. `{run_dir}/s1/plan.md`
 4. (evolve only) `{run_dir}/s0/survey.md`
-5. (if previous gateB rewrite or MAJOR loop) `{run_dir}/s2_design/feedback.md` or the latest `{run_dir}/s5/review.md`
+5. (if previous gateB rewrite or MAJOR loop) `{run_dir}/s2_design/feedback.md` — rewrite reason from gateB or preserved s5 review+verdict from the last loop.
 6. `{HARNESS_ROOT}/docs/task-spec.md`
 7. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
 

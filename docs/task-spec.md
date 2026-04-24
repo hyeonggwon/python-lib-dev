@@ -34,10 +34,12 @@
 
 ## 하드 게이트 (협상 불가, 스킵 금지)
 
-- 모든 테스트 통과 (`uv run pytest`)
-- `uv run mypy --strict` 통과
-- `uv run ruff check` + `uv run ruff format --check` 통과
-- 리뷰 `verdict.yaml`의 `hard_gates.blockers == 0`
+Orchestrator(`scripts/gates.py`)가 s5 직전에 직접 실행하고 `{run_dir}/gates/*.json` 에 기록한다. s5 LLM은 이 파일들을 **읽기만** 한다 (0-2 clean separation).
+
+- 모든 테스트 통과 (`uv run pytest`) → `gates/tests.json.passed == true`
+- `uv run mypy --strict` 통과 → `gates/mypy.json.passed == true`
+- `uv run ruff check` + `uv run ruff format --check` 통과 → `gates/ruff_check.json.passed && gates/ruff_format.json.passed`
+- 리뷰 `verdict.yaml.issues` 중 `severity == "blocker"` 0건 (LLM 판단)
 
 ---
 
@@ -61,7 +63,7 @@
 | — | CRITICAL 판정 에스컬레이션 | 공통 | 조건부 |
 | — | cap 도달 에스컬레이션 | 공통 | 조건부 |
 | — | 정체(stagnation) 감지 에스컬레이션 | 공통 | 조건부 |
-| Z | DELIVERY.md 인도 리뷰 | 공통 | 종료 상태 |
+| Z | delivery.md 인도 리뷰 | 공통 | 종료 상태 |
 
 블로킹 게이트: `new` 2개 (A, B) / `evolve` 3개 (0, A, B).
 
@@ -69,8 +71,8 @@
 
 ## 작업 공간
 
-- **new**: `outputs/<run-id>/workspace/` 에서 `uv init --lib <pkg>` 후 모든 작업 수행. 최종 목적지는 하네스가 결정하지 않는다. 사용자가 `DELIVERY.md` 보고 수동 이동.
-- **evolve**: `target_repo_path`에서 직접 작업하되 시작 시점에 **`git checkout -b <branch_name>`** 으로 브랜치 격리. `branch_name` 은 interview에서 확정되며 기본값은 `harness/<run-id>`, 사용자가 override 가능(`feat/...` 등). `main`/`master`에 머지하지 않음. `outputs/<run-id>/` 에는 작업 메타(plan, design, review, verdict, changes.patch, DELIVERY.md)만.
+- **new**: `outputs/<run-id>/workspace/` 에서 `uv init --lib <pkg>` 후 모든 작업 수행. 최종 목적지는 하네스가 결정하지 않는다. 사용자가 `delivery.md` 보고 수동 이동.
+- **evolve**: `target_repo_path`에서 직접 작업하되 시작 시점에 **`git checkout -b <branch_name>`** 으로 브랜치 격리. `branch_name` 은 interview에서 확정되며 기본값은 `harness/<run-id>`, 사용자가 override 가능(`feat/...` 등). `main`/`master`에 머지하지 않음. `outputs/<run-id>/` 에는 작업 메타(plan, design, review, verdict, changes.patch, delivery.md)만.
 
 Preflight가 두 모드 공통으로 `uv`/`git` 설치, evolve 모드는 `target_repo_path`의 git repo 여부와 dirty tree를 검증한다.
 
@@ -91,16 +93,17 @@ Preflight가 두 모드 공통으로 `uv`/`git` 설치, evolve 모드는 `target
 
 | 루프 | cap |
 |---|---|
-| 구현 내부 재시도 | 5 |
 | 리뷰→구현 (MINOR) | 3 |
 | 리뷰→설계 (MAJOR) | 2 |
 | 전체 stage 누적 | 15 |
+
+구현(s4) 내부 재시도(테스트 실패·import 오류 등 기술적 재시도)는 **하네스가 카운트하지 않는다**. s4 헤드리스가 스스로 제한(약 5회 권장)하고, 더 못 풀겠으면 `impl-notes.md` 에 "Blocked — needs review"로 기록해 s5 로 넘긴다.
 
 어느 하나라도 도달 시 `outputs/<run-id>/escalation.md` 생성 후 정지.
 
 ## 정체 감지
 
-연속된 `verdict.yaml` 2개에서 `(file, severity)` 조합이 **50% 이상 겹치면** 에스컬레이션. 같은 곳에서 같은 수준 문제가 반복되면 에이전트 혼자서는 못 푸는 것으로 본다.
+연속된 `verdict.yaml` 3개에서 `(file, severity, description 앞부분)` 조합의 **Jaccard 교집합/합집합 비율이 50% 이상이면** 에스컬레이션. 같은 곳에서 같은 수준 문제가 반복되면 에이전트 혼자서는 못 푸는 것으로 본다. window=3인 이유: MINOR 루프 cap(=3) 안에서 한 번 겹쳤다고 즉시 튀지 않게 하려는 것.
 
 ---
 
@@ -113,7 +116,7 @@ Preflight가 두 모드 공통으로 `uv`/`git` 설치, evolve 모드는 `target
 
 ## DELIVERY (종료 상태)
 
-`outputs/<run-id>/DELIVERY.md` 생성 후 하네스 정지. 내용:
+`outputs/<run-id>/delivery.md` 생성 후 하네스 정지. 내용:
 - 산출물 요약
 - 게이트 통과 기록, 루프 반복 횟수
 - 최종 coverage / mypy / ruff 결과

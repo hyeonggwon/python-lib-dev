@@ -29,7 +29,7 @@ echo "$HARNESS_ROOT"   # e.g. /home/user/harnesses/python-lib-dev
   3) outputs/<run-id>/interview/{spec.md, mode.json} 기록
   4) {{HARNESS_ROOT}}/scripts/run.py --run-id <id> 실행
   5) run.py가 게이트에 도달해 정지하면 해당 게이트 파일을 사용자와 같이 작성 후 run.py 재호출
-  6) 종료 상태(DELIVERY.md) 까지 반복
+  6) 종료 상태(delivery.md) 까지 반복
 ```
 
 ## 2. 단계별 지침
@@ -63,7 +63,7 @@ python {{HARNESS_ROOT}}/scripts/run.py --run-id <run-id>
 - 각 단계 headless 호출
 - 게이트 도달 시 `<gate>.request.md` 생성 후 종료 코드 0으로 정지
 - 에스컬레이션 발생 시 `escalation.md` 생성 후 종료 코드 2로 정지
-- 모든 단계 통과 시 `DELIVERY.md` 생성 후 종료 코드 0
+- 모든 단계 통과 시 `delivery.md` 생성 후 종료 코드 0
 
 ### 2-4. 게이트 처리
 
@@ -89,7 +89,7 @@ python {{HARNESS_ROOT}}/scripts/run.py --run-id <run-id>
 
 ### 2-5. 종료
 
-`DELIVERY.md` 가 생성되면 작업 완료. 사용자에게:
+`delivery.md` 가 생성되면 작업 완료. 사용자에게:
 - new 모드: `$RUN_DIR/workspace/` 를 원하는 위치로 옮길 것 안내
 - evolve 모드: `target_repo_path` 의 작업 브랜치(interview에서 확정된 `branch_name`, 기본값은 `harness/<run-id>`)를 PR 또는 머지할 것 안내
 
