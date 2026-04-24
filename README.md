@@ -18,10 +18,10 @@ uv pip install pyyaml    # 또는 pip install pyyaml, 최초 한 번만 실행
 제거는 `./uninstall.sh` (symlink만 제거).
 
 ## Quick Start
-Claude Code 세션 
--> "파이썬 라이브러리 만들어줘" / "이 라이브러리에 X 기능 추가" 같이 요청 or `orchestrate-python-lib` skill을 트리거
--> 메인 세션이 interview → run 초기화 → 파이프라인 실행을 끝까지 몰아간다.
--> 블로킹 게이트에서 멈추면 `<gate>.decision.md`를 함께 작성하고 재개.
+Claude Code 세션</br>
+-> "파이썬 라이브러리 만들어줘" / "이 라이브러리에 X 기능 추가" 같이 요청 or `orchestrate-python-lib` skill을 트리거</br>
+-> 메인 세션이 interview → run 초기화 → 파이프라인 실행을 끝까지 몰아간다.</br>
+-> 블로킹 게이트에서 멈추면 `<gate>.decision.md`를 함께 작성하고 재개.</br>
 
 ## How It Works
 
