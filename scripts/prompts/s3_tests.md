@@ -26,7 +26,20 @@ Translate the approved design into a failing pytest suite that pins down the pub
   cd {run_dir}/workspace || (mkdir -p {run_dir}/workspace && cd {run_dir}/workspace && uv init --lib {lib_name})
   ```
   Configure `pyproject.toml` for `requires-python` from `interview/mode.json`, `ruff`, `mypy --strict`, pytest, and coverage.
+
+  **Required dev dependencies** (install explicitly — these are what the mechanical gates need):
+  ```bash
+  cd {run_dir}/workspace && uv add --dev pytest pytest-cov mypy ruff
+  ```
+  `pytest-cov` in particular is **not optional** — the orchestrator's gates preflight-checks `import pytest_cov` and aborts the whole run with a toolchain error if it's missing.
+
 - **evolve mode**: write **new** tests into `{run_dir}/s3/tests-new/` as a staging area. **Do not** touch `{target_repo_path}/tests/` in this stage — integration into the real tests directory happens in s4.
+
+  Also verify the target repo has `pytest-cov` available (`uv run python -c "import pytest_cov"`). If it's missing, add it now:
+  ```bash
+  cd {target_repo_path} && uv add --dev pytest-cov
+  ```
+  Record the addition in `{run_dir}/s3/test-manifest.md` under "Dev-dep additions" so s4 can commit it on the harness branch. Same applies to `mypy` / `ruff` if the repo lacks them (rare but possible).
 
 ### Required meta file
 

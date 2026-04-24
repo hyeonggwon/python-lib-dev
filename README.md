@@ -30,7 +30,7 @@ Claude Code 세션
 3. **Orchestrate** — `scripts/run.py --run-id <id>`가 각 단계(s0..s8)를 headless로 호출.
 4. **Gates** — 블로킹 게이트(evolve의 survey, plan, design) 도달 시 `<gate>.request.md` 남기고 정지. 사용자와 함께 decision 작성 후 같은 명령으로 재개.
 5. **Loop** — s5 리뷰 verdict에 따라 MINOR → s4, MAJOR → s2로 자동 루프백. CRITICAL / cap 초과 / 정체 시 `escalation.md` 생성 후 정지.
-6. **Deliver** — 모든 단계 통과 시 `DELIVERY.md` 생성 후 종료.
+6. **Deliver** — 모든 단계 통과 시 `delivery.md` 생성 후 종료.
 
 단계 정의·state/verdict 스키마·게이트 포맷은 `docs/stages.md`.
 
@@ -67,13 +67,14 @@ s1/plan.md
 s2/{design.md, api_stubs.py}
 s3/...                        # new는 workspace/tests/에 직접, evolve는 tests-new/
 s4/{impl-notes.md, changes.patch}   # changes.patch는 evolve만
-s5/{review.md, verdict.yaml, test-run.log}
+gates/{summary.json, tests.json, mypy.json, ruff_check.json, ruff_format.json, coverage.json}
+s5/{review.md, verdict.yaml}
 s6/decision.json
 gate0.request.md / gate0.decision.md    # evolve 전용
 gateA.request.md / gateA.decision.md
 gateB.request.md / gateB.decision.md
 escalation.md / escalation.decision.md  # 필요 시
-DELIVERY.md
+delivery.md
 
 workspace/                    # new 모드 산출물 (실제 라이브러리 본체)
   pyproject.toml, src/<pkg>/, tests/, README.md, docs/, CHANGELOG.md

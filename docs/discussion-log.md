@@ -197,7 +197,7 @@ loop_target: implement | design | null
 
 "승인 안 하면 진행 불가" 블로킹이 아닌 **종료 상태로서의 인도 문서**.
 
-- 마지막 단계가 `DELIVERY.md` 생성 후 정지.
+- 마지막 단계가 `delivery.md` 생성 후 정지.
 - 내용: 산출물 요약, 게이트 통과 기록, 커버리지 / 타입 체크 결과, 알려진 한계, 사용자가 할 다음 작업 (`uv publish`, git 태그, CHANGELOG 링크 등).
 - 사용자가 읽고 직접 판단 (커밋 / 게시 / 재작업 / 폐기). 하네스는 더 이상 행동하지 않음.
 
@@ -211,7 +211,7 @@ loop_target: implement | design | null
 | — | CRITICAL 판정 에스컬레이션 | new / evolve | 조건부 |
 | — | 캡 도달 에스컬레이션 | new / evolve | 조건부 |
 | — | 정체 감지 에스컬레이션 | new / evolve | 조건부 |
-| Z | 인도 리뷰 (DELIVERY.md) | new / evolve | 종료 상태 |
+| Z | 인도 리뷰 (delivery.md) | new / evolve | 종료 상태 |
 
 블로킹 게이트: new 2개 / evolve 3개. 조건부 에스컬레이션은 문제 발생 시에만 발동.
 
@@ -225,7 +225,7 @@ loop_target: implement | design | null
 
 - deep-interview에서 최종 목적지 안 물음.
 - 매 실행마다 `outputs/<run-id>/workspace/` 안에서 `uv init`부터 전부 수행.
-- 종료 시 `DELIVERY.md`에 "산출물을 어디로 옮길지는 사용자 결정" 명시.
+- 종료 시 `delivery.md`에 "산출물을 어디로 옮길지는 사용자 결정" 명시.
 - 사용자가 수동으로 `cp -r` 또는 `git init` 후 push.
 
 근거: 중간 abort 시 사이드 이펙트 없이 버릴 수 있음. 라이브러리 이름도 interview 시점엔 임시일 수 있어 최종 경로에 못 박지 않음.
@@ -235,7 +235,7 @@ loop_target: implement | design | null
 - deep-interview에서 `target_repo_path` 필수 입력.
 - 시작 시점에 **`git checkout -b harness/<run-id>` 강제**.
 - 완료 시 main에 머지하지 않음 — 사용자가 직접 PR 또는 머지.
-- `outputs/<run-id>/`엔 작업 메타(plan, design, review, verdict, changes.patch, DELIVERY.md)만.
+- `outputs/<run-id>/`엔 작업 메타(plan, design, review, verdict, changes.patch, delivery.md)만.
 
 **Preflight 검사 (두 모드 공통)**:
 
@@ -294,7 +294,7 @@ loop_target: implement | design | null
 | 루프 cap | 구현 5 / MINOR 3 / MAJOR 2 / 전체 15 |
 | 기획 루프백 | 자동 금지, 사용자 게이트 |
 | 정체 감지 | 연속 verdict의 issues 50% 이상 겹침 |
-| 종료 상태 | DELIVERY.md 인도 리뷰 |
+| 종료 상태 | delivery.md 인도 리뷰 |
 | new 작업 공간 | `outputs/<run-id>/workspace/` 격리 |
 | evolve 작업 공간 | `target_repo_path` + `harness/<run-id>` 브랜치 |
 | 하네스 설치 위치 | `~/harnesses/`, skills는 `~/.claude/skills/` |
@@ -350,4 +350,11 @@ loop_target: implement | design | null
 | Placeholder 전략 | 정본은 placeholder 유지, runtime resolve (install-time 치환 없음) |
 | evolve 브랜치명 | interview 확정값 (기본 `harness/<run-id>`, 사용자 override 가능) |
 
-나머지 항목(대상, 도구 스택, 레이아웃, 모드 분기, 블로킹 게이트, 리뷰어, verdict 스키마, 루프 cap, 기획 루프백, 정체 감지, 종료 상태, new/evolve 작업 공간)은 원본 결정이 그대로 구현되었다.
+나머지 항목(대상, 도구 스택, 레이아웃, 모드 분기, 블로킹 게이트, 리뷰어, 루프 cap, 기획 루프백, 정체 감지, 종료 상태, new/evolve 작업 공간)은 원본 결정이 그대로 구현되었다. verdict 스키마는 아래 A7 참조.
+
+## A7. 기계 게이트 실행 주체 (0-2 clean separation)
+
+- **원본**: s5 리뷰 headless가 `uv run pytest / mypy / ruff` 를 **직접 실행**하고 결과를 `verdict.yaml.hard_gates` 와 `verdict.yaml.thresholds` 필드에 기록.
+- **실제**: orchestrator (`scripts/gates.py`) 가 s5 직전에 해당 명령을 **직접 실행**하고 결과를 `{run_dir}/gates/*.json` 에 authoritative로 기록. s5 headless 는 이 파일들을 **읽기만** 하고 판단 필드만 작성 (`verdict`, `rationale`, `issues`, `loop_target`). `hard_gates`/`thresholds` 필드는 verdict 스키마에서 삭제.
+- **이유**: harness-builder SKILL.md §0-2. LLM이 기계 검증 가능한 사실(테스트 통과 여부 등)을 주장하게 두면 헛소리가 그대로 파이프라인을 통과할 수 있다. Python이 authoritative로 돌리고 LLM은 그 결과를 입력으로 받아 판단만 하는 구조가 "기계/판단 권한 분리"의 가장 깨끗한 형태. 추가 safeguard로 s6 decision에 cross-check guard 삽입: `gates.all_passed == false` 인데 LLM이 `verdict == PASS` 쓰면 자동 `llm_pass_despite_failing_gates` 에스컬레이션.
+- **영향받는 파일**: 신규 `scripts/gates.py`, `scripts/run.py` (stage_s5_review, stage_s6_decide, STAGE_TOOLS의 s5_review에서 `Bash(uv run *)` 제거), `scripts/prompts/s5_review.md` 전면 재작성, `docs/stages.md` verdict 스키마 및 디렉토리 레이아웃 갱신, `docs/task-spec.md` 하드 게이트 표현 갱신, `docs/tacit-knowledge.md` s5 입력 목록 갱신.

@@ -50,10 +50,10 @@ def main() -> int:
         "overrides": {
             "line_coverage": None,
             "branch_coverage": None,
-            "max_major_new": None,
-            "max_major_evolve": None,
+            "max_major_issues_new": None,
+            "max_major_issues_evolve": None,
         },
-        "counters": {"impl_retry": 0, "minor_loop": 0, "major_loop": 0, "total_stages": 0},
+        "counters": {"minor_loop": 0, "major_loop": 0, "total_stages": 0},
         "verdict_history": [],
         "gate_decisions": {},
         "preflight_done": False,

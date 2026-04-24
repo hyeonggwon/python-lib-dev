@@ -16,10 +16,11 @@
 | **s2** | 설계 | 공통 | headless | spec + plan + (evolve: survey) | `s2/design.md`, `s2/api_stubs.py` | **게이트 B** |
 | **s3** | 테스트 작성 | 공통 | headless | design + api_stubs + (evolve: 기존 tests/) | new: `workspace/tests/`<br>evolve: `s3/tests-new/` + `s3/test-manifest.md` | — |
 | **s4** | 구현 | 공통 | headless | design + api_stubs + tests | new: `workspace/src/<pkg>/`<br>evolve: 실제 수정 + `s4/changes.patch`, `s4/impl-notes.md` | 내부 재시도 cap 5 |
-| **s5** | 리뷰 | 공통 | **독립 headless** | plan + design + api_stubs + tests + 코드 + 테스트 실행 결과 | `s5/review.md`, `s5/verdict.yaml`, `s5/test-run.log` | — |
+| **gates** | 기계 검증 | 공통 | **orchestrator (`gates.py`)** | workspace/ 또는 target_repo | `gates/summary.json` + 각 게이트 *.json | — |
+| **s5** | 리뷰 | 공통 | **독립 headless** | plan + design + api_stubs + tests + 코드 + `gates/*.json` | `s5/review.md`, `s5/verdict.yaml` | — |
 | **s6** | 판정 & 루프 | 공통 | script 로직 (LLM 호출 없음) | `s5/verdict.yaml`, `state.json`, `config.yaml` | `s6/decision.json` | CRITICAL/cap/정체 시 **에스컬레이션 게이트** |
 | **s7** | 문서화 | 공통 | headless | 전체 산출물 | new: `workspace/README.md`, `workspace/docs/`, `workspace/CHANGELOG.md`<br>evolve: README/CHANGELOG 갱신 + (breaking 시) `MIGRATION.md` | — |
-| **s8** | 인도 리뷰 | 공통 | script (템플릿 채우기) | state + 모든 산출물 | `DELIVERY.md` | **종료 상태** |
+| **s8** | 인도 리뷰 | 공통 | script (템플릿 채우기) | state + 모든 산출물 | `delivery.md` | **종료 상태** |
 
 **evolve 모드**: s3의 `tests-new/`는 s4에서 `target_repo_path/tests/`에 통합. 기존 테스트는 유지.
 
@@ -41,11 +42,10 @@
   "overrides": {
     "line_coverage": null,
     "branch_coverage": null,
-    "max_major_new": null,
-    "max_major_evolve": null
+    "max_major_issues_new": null,
+    "max_major_issues_evolve": null
   },
   "counters": {
-    "impl_retry": 0,
     "minor_loop": 0,
     "major_loop": 0,
     "total_stages": 0
@@ -75,17 +75,11 @@
 
 ## `s5/verdict.yaml` 스키마 (고정, 자유 서술 금지)
 
+s5 LLM이 **판단 필드만** 작성한다. 기계 게이트 결과(tests/mypy/ruff/coverage pass 여부 + 커버리지 %)는 orchestrator가 `{run_dir}/gates/*.json` 에 authoritative로 기록하며 verdict에 포함하지 않는다 (0-2 clean separation).
+
 ```yaml
 verdict: PASS | MINOR | MAJOR | CRITICAL
 rationale: "한 문장 이유"
-hard_gates:
-  tests_pass: true
-  mypy_strict: true
-  ruff: true
-  blockers: 0
-thresholds:
-  line_coverage: 0.92
-  branch_coverage: 0.81
 issues:
   - severity: blocker   # blocker | major | minor
     stage_to_loop: implement   # implement | design | null
@@ -94,10 +88,25 @@ issues:
 loop_target: implement  # implement | design | null (PASS/CRITICAL은 null)
 ```
 
-- `verdict == PASS`: s7로 진행.
+- `verdict == PASS`: s7로 진행. 단, `gates/summary.json.all_passed == false` 이면 자동으로 `llm_pass_despite_failing_gates` 에스컬레이션 (LLM이 게이트 결과를 무시한 신호).
 - `verdict == MINOR`: `loop_target == "implement"`, s4로 루프백.
 - `verdict == MAJOR`: `loop_target == "design"`, s2로 루프백.
 - `verdict == CRITICAL`: `loop_target == null`, 에스컬레이션 게이트로.
+
+## `gates/*.json` (orchestrator가 작성)
+
+`{run_dir}/gates/` 아래 파일들은 `scripts/gates.py` 가 s5 직전에 생성한다. LLM은 읽기만 한다.
+
+- `summary.json` — `{all_passed, gates: {tests, mypy, ruff_check, ruff_format, coverage}, line_coverage, branch_coverage, line_threshold, branch_threshold}`
+- `tests.json`, `mypy.json`, `ruff_check.json`, `ruff_format.json`, `coverage.json` — 각 게이트의 `{passed, rc, output_tail}`. `coverage.json` 에는 `line_coverage`, `branch_coverage`, `line_threshold`, `branch_threshold`, `thresholds_met` 추가. **커버리지 임계치 비교는 orchestrator가 한다** — `coverage.passed` 는 `tests_pass && thresholds_met` 로 이미 반영되어 있으므로 s5는 다시 비교하지 않는다.
+
+## `effective_thresholds.json` (orchestrator가 작성)
+
+`{run_dir}/effective_thresholds.json` 은 `run.py:stage_s5_review` 가 s5 직전에 config.yaml defaults + mode.json.overrides 를 머지해 쓰는 **해석된 정책 스냅샷**. s5 LLM이 override를 재계산하지 않도록 하기 위한 파일.
+
+- 필드: `mode`, `line_coverage`, `branch_coverage`, `max_major_issues_new`, `max_major_issues_evolve`, `max_major_issues_applicable`.
+- `max_major_issues_applicable` 은 현재 run의 mode 에 맞는 값(new면 `_new`, evolve면 `_evolve`).
+- 오버라이드 키는 `config.yaml` 키와 **이름이 동일**해야 한다 (`line_coverage`, `branch_coverage`, `max_major_issues_new`, `max_major_issues_evolve`). 이름 불일치는 무음 실패를 유발하므로 `init_run.py` / interview skill / docs 간 동기화 필수.
 
 ---
 
@@ -141,7 +150,7 @@ decision 파일(`<gate>.decision.md`)에 다음 형식으로 작성:
 조건:
 - `verdict.yaml.verdict == CRITICAL`
 - counters 중 하나가 cap 도달
-- 정체 감지 (연속 verdict_history 2개의 `issues_key` 교집합 비율 ≥ 0.5)
+- 정체 감지 (연속 verdict_history 3개의 `issues_key` Jaccard 교집합 비율 ≥ 0.5)
 
 script는 이 파일 생성 후 종료 코드 2로 정지.
 
@@ -204,17 +213,23 @@ outputs/<run-id>/
   s4/
     impl-notes.md
     changes.patch         # evolve만
+  gates/                  # orchestrator가 s5 직전에 작성 (0-2)
+    summary.json
+    tests.json
+    mypy.json
+    ruff_check.json
+    ruff_format.json
+    coverage.json
   s5/
     review.md
     verdict.yaml
-    test-run.log
   s6/
     decision.json
   s7/                     # new는 workspace/ 직접; evolve는 README diff만 기록
     docs-diff.patch       # evolve만
   escalation.md           # 필요 시
   escalation.decision.md  # 사용자 작성
-  DELIVERY.md
+  delivery.md
 
 # new 모드만
 outputs/<run-id>/workspace/
@@ -235,5 +250,5 @@ outputs/<run-id>/workspace/
 3. `run.py`가 preflight → s0 (evolve만) → 게이트 0 요청 파일 생성 후 정지.
 4. 메인 세션이 사용자와 decision 파일 작성 후 `run.py --resume <id>`.
 5. 자동으로 s1 → 게이트 A → s2 → 게이트 B → s3 → s4 → s5 → s6 판정 → (루프 or 진행) → s7 → s8.
-6. DELIVERY.md 생성 후 종료.
+6. delivery.md 생성 후 종료.
 7. 중간 어디서든 에스컬레이션 발생 시 `escalation.md` 생성 후 정지, 메인 세션 사용자 결정 후 `--resume`.

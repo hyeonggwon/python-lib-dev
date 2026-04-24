@@ -83,8 +83,8 @@ HARNESS_ROOT=$(dirname $(dirname $(dirname $(realpath ~/.claude/skills/deep-inte
   "overrides": {
     "line_coverage": null,
     "branch_coverage": null,
-    "max_major_new": null,
-    "max_major_evolve": null
+    "max_major_issues_new": null,
+    "max_major_issues_evolve": null
   }
 }
 ```

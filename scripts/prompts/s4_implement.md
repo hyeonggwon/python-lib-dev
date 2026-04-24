@@ -14,7 +14,7 @@ Make the failing tests pass with minimal, clean implementation that honors the d
 4. `{run_dir}/s2/api_stubs.py`
 5. **new mode**: tests in `{run_dir}/workspace/tests/`
 6. **evolve mode**: existing repo at `{target_repo_path}` (already on branch `harness/{run_id}`) + staged new tests in `{run_dir}/s3/tests-new/`
-7. (if looping back from MINOR) `{run_dir}/s5/review.md` and `{run_dir}/s5/verdict.yaml` — fix the listed issues
+7. (if looping back from MINOR) `{run_dir}/s4_implement/feedback.md` — prior s5 review + verdict, preserved by the orchestrator before s5 was cleared. Fix the listed issues.
 8. `{HARNESS_ROOT}/docs/task-spec.md`
 9. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
 
@@ -26,7 +26,7 @@ Make the failing tests pass with minimal, clean implementation that honors the d
   2. Modify `{target_repo_path}` source to make new tests pass while keeping existing tests green.
   3. Commit in logical steps on branch `harness/{run_id}` (Conventional Commits). No squashing.
 
-## Required loop (re-run up to retry cap)
+## Required loop
 
 1. `uv run pytest -q` — must pass.
 2. `uv run mypy --strict` on the package (new: `src` and `tests`; evolve: follow the repo's mypy config but ensure `--strict` on touched modules).
@@ -34,7 +34,7 @@ Make the failing tests pass with minimal, clean implementation that honors the d
 4. `uv run ruff format --check .` — must pass.
 5. Coverage run: `uv run pytest --cov={lib_name} --cov-branch --cov-report=term-missing`.
 
-If any step fails, fix and retry. The harness caps internal retries at the value in `{HARNESS_ROOT}/scripts/config.yaml` (`caps.impl_retry`).
+If any step fails, fix and retry. Self-limit internal retries: if after a small number of attempts (≈5) you still cannot make a step pass, stop and record the failure in `impl-notes.md` under "Blocked — needs review". The orchestrator will surface it via s5 and loop back if appropriate. The harness itself does **not** count these retries.
 
 ## Output meta
 

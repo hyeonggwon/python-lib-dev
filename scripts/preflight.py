@@ -47,6 +47,35 @@ def check_target(path_str: str) -> list[str]:
             "    commit, stash, or clean before running the harness."
         )
 
+    # The harness runs every tool via `uv run ...` against this repo (gates.py
+    # and all stage prompts). A repo without a pyproject.toml — or one with a
+    # pyproject.toml but no `[project]` table (e.g., legacy setup.py-only, or
+    # non-PEP-621 poetry configs) — will fail opaquely deep inside gates.py.
+    # Catch it here with a clear message so the user can decide whether to
+    # adapt the repo or use a different harness.
+    pyproject = p / "pyproject.toml"
+    if not pyproject.exists():
+        errors.append(
+            f"target_repo_path has no pyproject.toml: {p}\n"
+            "    this harness drives tooling via `uv run ...`, which requires a\n"
+            "    PEP 621 pyproject.toml. Legacy setup.py-only repos are not supported."
+        )
+    else:
+        text = pyproject.read_text(errors="replace")
+        if "[project]" not in text and "[tool.poetry]" not in text:
+            errors.append(
+                f"target_repo_path pyproject.toml has no recognizable [project] table: {p}\n"
+                "    `uv run` needs a PEP 621 [project] table (or tool.poetry that uv can read)."
+            )
+        elif "[tool.poetry]" in text and "[project]" not in text:
+            # Poetry-only projects sometimes work with uv, sometimes don't —
+            # warn rather than hard-fail so the user isn't blocked needlessly.
+            errors.append(
+                f"target_repo_path appears to be poetry-only (no [project] table): {p}\n"
+                "    uv may not handle this cleanly. If `uv run pytest` fails later,\n"
+                "    migrate to a PEP 621 [project] table or use a different harness."
+            )
+
     return errors
 
 
