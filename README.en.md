@@ -20,10 +20,10 @@ To uninstall, run `./uninstall.sh` (removes symlinks only).
 
 ## Quick Start
 
-In a Claude Code session
--> Request something like "Build a Python library" / "Add feature X to this library", or trigger the `orchestrate-python-lib` skill
--> The main session drives interview → run initialization → pipeline execution end-to-end.
--> If it stops at a blocking gate, fill out `<gate>.decision.md` together and resume.
+In a Claude Code session</br>
+-> Request something like "Build a Python library" / "Add feature X to this library", or trigger the `orchestrate-python-lib` skill</br>
+-> The main session drives interview → run initialization → pipeline execution end-to-end.</br>
+-> If it stops at a blocking gate, fill out `<gate>.decision.md` together and resume.</br>
 
 ## How It Works
 
