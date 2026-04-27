@@ -12,10 +12,10 @@
 
 ```bash
 uv pip install --system pyyaml    # 또는 pip install --user pyyaml, 최초 한 번만 실행
-./install.sh             # ~/.claude/skills/ symlink 생성 스크립트, 최초 한 번만 실행
+./install.sh             # git pre-commit 훅 활성화 (core.hooksPath = .githooks)
 ```
 
-제거는 `./uninstall.sh` (symlink만 제거).
+skill은 project-local (`.claude/skills/`)이므로 별도 설치 없이 이 디렉토리 안에서 Claude Code 를 띄우면 자동 인식된다.
 
 ## Quick Start
 Claude Code 세션</br>
@@ -38,7 +38,7 @@ Claude Code 세션</br>
 
 ```
 python-lib-dev/
-  install.sh / uninstall.sh   # symlink 설치/제거 + core.hooksPath 설정
+  install.sh                  # core.hooksPath = .githooks 설정 (그게 전부)
   scripts/
     init_run.py               # run 디렉토리 + state.json 초기화
     preflight.py              # uv / git / claude / target_repo_path 검증
@@ -47,7 +47,7 @@ python-lib-dev/
     validate_harness.py       # 프롬프트 ↔ STAGE_TOOLS / 치환 / feedback 경로 drift 검사
     config.yaml               # 캡, 임계치, 정체 감지 파라미터
     prompts/                  # s0..s7 프롬프트 정본
-  skills/                     # install.sh이 ~/.claude/skills/로 symlink
+  .claude/skills/             # project-local skill (CWD 가 이 레포 안일 때만 로드)
     orchestrate-python-lib/
     deep-interview-python-lib/
     python-library-conventions/
@@ -87,7 +87,7 @@ workspace/                    # new 모드 산출물 (실제 라이브러리 본
 
 이 레포를 수정할 때는 **`CLAUDE.md`를 먼저 읽는다.** 요약하면:
 
-- `skills/<name>/SKILL.md`가 정본, `~/.claude/skills/` 하위는 symlink. 직접 편집 금지.
+- `.claude/skills/<name>/SKILL.md`가 정본 (project-local).
 - 루트에 `pyproject.toml` / `src/` / `tests/`를 만들지 말 것 — 이 레포는 라이브러리가 아님.
 - `outputs/`는 커밋 금지.
 

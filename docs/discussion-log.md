@@ -358,3 +358,11 @@ loop_target: implement | design | null
 - **실제**: orchestrator (`scripts/gates.py`) 가 s5 직전에 해당 명령을 **직접 실행**하고 결과를 `{run_dir}/gates/*.json` 에 authoritative로 기록. s5 headless 는 이 파일들을 **읽기만** 하고 판단 필드만 작성 (`verdict`, `rationale`, `issues`, `loop_target`). `hard_gates`/`thresholds` 필드는 verdict 스키마에서 삭제.
 - **이유**: harness-builder SKILL.md §0-2. LLM이 기계 검증 가능한 사실(테스트 통과 여부 등)을 주장하게 두면 헛소리가 그대로 파이프라인을 통과할 수 있다. Python이 authoritative로 돌리고 LLM은 그 결과를 입력으로 받아 판단만 하는 구조가 "기계/판단 권한 분리"의 가장 깨끗한 형태. 추가 safeguard로 s6 decision에 cross-check guard 삽입: `gates.all_passed == false` 인데 LLM이 `verdict == PASS` 쓰면 자동 `llm_pass_despite_failing_gates` 에스컬레이션.
 - **영향받는 파일**: 신규 `scripts/gates.py`, `scripts/run.py` (stage_s5_review, stage_s6_decide, STAGE_TOOLS의 s5_review에서 `Bash(uv run *)` 제거), `scripts/prompts/s5_review.md` 전면 재작성, `docs/stages.md` verdict 스키마 및 디렉토리 레이아웃 갱신, `docs/task-spec.md` 하드 게이트 표현 갱신, `docs/tacit-knowledge.md` s5 입력 목록 갱신.
+
+## A8. Skill 위치 — user-level symlink → project-local
+
+- **원본 (A4 / A6)**: 정본 `<harness>/skills/<name>/SKILL.md`, symlink `~/.claude/skills/<name>`. `install.sh` / `uninstall.sh` 가 symlink 생성/제거 담당. HARNESS_ROOT resolve 는 `dirname×3 + realpath ~/.claude/skills/.../SKILL.md` (symlink target 추적).
+- **실제**: 정본 = 위치 = `<harness>/.claude/skills/<name>/SKILL.md`. **project-local skill** 로 이주. `install.sh` 의 symlink 로직 제거 → `core.hooksPath = .githooks` 설정만 남음. `uninstall.sh` 삭제 (되돌릴 게 없음). HARNESS_ROOT resolve 는 `git rev-parse --show-toplevel` 한 줄.
+- **이유**: user-level symlink 방식은 `~/.claude/skills/` 에 하네스 skill 메타데이터를 항상 등록하므로 **모든 Claude Code 세션**에서 토큰을 차지함. 사용자가 다른 프로젝트에서 작업할 때도 `orchestrate-python-lib`/`deep-interview-python-lib`/`python-library-conventions` description 이 컨텍스트에 로드되어 누적 비용 발생. project-local 로 두면 CWD 가 이 harness 레포(또는 그 하위)일 때만 로드된다. 트레이드오프는 호출 측이 harness 디렉토리에서 Claude Code 를 띄워야 한다는 것 — 실행 결과는 `target_repo_path` / `outputs/<run-id>/workspace/` 어디로든 가므로 운용 제약은 사실상 없음.
+- **A4 와의 관계**: A4 의 placeholder 정책은 그대로 유지 — `{{HARNESS_ROOT}}` 정본은 placeholder, runtime resolve. 단지 resolve 방식이 `realpath` 기반에서 `git rev-parse` 로 바뀌었을 뿐. install-time 치환 부활 금지 원칙은 동일.
+- **영향받는 파일**: `skills/` → `.claude/skills/` (`git mv`), 3 개 SKILL.md §0 의 resolve 한 줄 교체, `install.sh` 슬림화, `uninstall.sh` 삭제, `CLAUDE.md` §3 / §6 / §9 갱신, `README.md` / `README.en.md` Initialize 및 Architecture 섹션 갱신.

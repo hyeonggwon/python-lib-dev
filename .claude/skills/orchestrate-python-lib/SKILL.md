@@ -9,16 +9,14 @@ description: 파이썬 라이브러리의 신규 개발(new) 또는 유지보수
 
 ## 0. 먼저 — HARNESS_ROOT 구하기
 
-이 skill 및 연관 문서에 등장하는 모든 `{{HARNESS_ROOT}}` 는 **placeholder**다. 파일 정본은 placeholder 형태로 유지되며 install 시점에 치환되지 않는다. 메인 세션이 이 skill을 로드한 직후 bash 한 줄로 resolve 하고, 이후 모든 `{{HARNESS_ROOT}}` 를 그 값으로 대입해 해석한다.
+이 skill은 **project-local** (`<harness>/.claude/skills/orchestrate-python-lib/`) 이므로 로드 시점에 CWD 가 이미 harness 레포 안이다. 메인 세션은 다음 한 줄로 값을 잡고, 이후 이 문서에 등장하는 모든 `{{HARNESS_ROOT}}` 를 그 값으로 대입해 해석한다.
 
 ```bash
-HARNESS_ROOT=$(dirname $(dirname $(dirname $(realpath ~/.claude/skills/orchestrate-python-lib/SKILL.md))))
+HARNESS_ROOT=$(git rev-parse --show-toplevel)
 echo "$HARNESS_ROOT"   # e.g. /home/user/harnesses/python-lib-dev
 ```
 
-이 값은 세션 내내 유효하며, `deep-interview-python-lib`, `python-library-conventions` 를 호출할 때 그대로 전달/공유하면 된다 (각 skill도 자기 기준 동일 resolve를 지원하므로 독립 호출도 가능).
-
-이하 이 문서의 모든 `{{HARNESS_ROOT}}` 는 이 값을 가리킨다.
+이 값은 세션 내내 유효하며, `deep-interview-python-lib`, `python-library-conventions` 를 호출할 때 그대로 공유하면 된다 (각 skill도 같은 resolve 를 사용).
 
 ## 1. 전체 흐름
 

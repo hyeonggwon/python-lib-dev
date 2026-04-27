@@ -9,10 +9,10 @@ python-lib-dev 하네스의 **첫 단계**. 메인 세션이 사용자와 대화
 
 ## 0. HARNESS_ROOT 구하기
 
-이 문서의 `{{HARNESS_ROOT}}` 는 placeholder. 메인 세션이 아직 값을 모른다면:
+이 skill 은 project-local (`<harness>/.claude/skills/deep-interview-python-lib/`). 메인 세션이 아직 값을 모른다면:
 
 ```bash
-HARNESS_ROOT=$(dirname $(dirname $(dirname $(realpath ~/.claude/skills/deep-interview-python-lib/SKILL.md))))
+HARNESS_ROOT=$(git rev-parse --show-toplevel)
 ```
 
 `orchestrate-python-lib` 에서 이미 resolve 했다면 그 값을 그대로 사용.

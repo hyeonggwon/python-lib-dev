@@ -13,10 +13,10 @@ A Claude Code harness that builds or updates a single Python library through a p
 
 ```bash
 uv pip install --system pyyaml    # or pip install --user pyyaml, one-time only
-./install.sh             # creates symlinks under ~/.claude/skills/, one-time only
+./install.sh             # activates the git pre-commit hook (core.hooksPath = .githooks)
 ```
 
-To uninstall, run `./uninstall.sh` (removes symlinks only).
+Skills are project-local (`.claude/skills/`), so no installation step is needed — they load automatically when Claude Code runs inside this repo.
 
 ## Quick Start
 
@@ -40,7 +40,7 @@ Stage definitions, state/verdict schemas, and gate formats are in `docs/stages.m
 
 ```
 python-lib-dev/
-  install.sh / uninstall.sh   # symlink install/uninstall + core.hooksPath setup
+  install.sh                  # sets core.hooksPath = .githooks (that's it)
   scripts/
     init_run.py               # initializes run directory + state.json
     preflight.py              # validates uv / git / claude / target_repo_path
@@ -49,7 +49,7 @@ python-lib-dev/
     validate_harness.py       # drift checks: prompts ↔ STAGE_TOOLS / placeholders / feedback paths
     config.yaml               # caps, thresholds, stall detection params
     prompts/                  # source prompts for s0..s7
-  skills/                     # install.sh symlinks these into ~/.claude/skills/
+  .claude/skills/             # project-local skills (load only when CWD is inside this repo)
     orchestrate-python-lib/
     deep-interview-python-lib/
     python-library-conventions/
@@ -89,7 +89,7 @@ workspace/                    # new mode artifacts (the actual library body)
 
 When modifying this repo, **read `CLAUDE.md` first.** Summary:
 
-- `skills/<name>/SKILL.md` is the source of truth; paths under `~/.claude/skills/` are symlinks. Do not edit them directly.
+- `.claude/skills/<name>/SKILL.md` is the source of truth (project-local).
 - Do not create `pyproject.toml` / `src/` / `tests/` at the root — this repo is not a library.
 - Do not commit `outputs/`.
 

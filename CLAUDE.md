@@ -1,7 +1,7 @@
 # CLAUDE.md — python-lib-dev 하네스 유지보수 가이드
 
 이 파일은 **이 하네스 레포(`/home/obigo/harnesses/python-lib-dev/`)를 수정할 때만** 유효하다.
-하네스를 **사용**(라이브러리 생성/수정)할 때의 작업 공간은 `outputs/<run-id>/workspace/` 또는 `target_repo_path`이며, 그쪽 규약은 이 파일이 아니라 `skills/python-library-conventions/SKILL.md`가 관장한다.
+하네스를 **사용**(라이브러리 생성/수정)할 때의 작업 공간은 `outputs/<run-id>/workspace/` 또는 `target_repo_path`이며, 그쪽 규약은 이 파일이 아니라 `.claude/skills/python-library-conventions/SKILL.md`가 관장한다.
 
 ---
 
@@ -19,11 +19,11 @@
 
 ### 2-1. `{{HARNESS_ROOT}}` — skill/문서용, **영구 유지**
 
-대상 파일: `skills/*/SKILL.md`, `docs/*.md`.
+대상 파일: `.claude/skills/*/SKILL.md`, `docs/*.md`.
 
-- 정본에 `{{HARNESS_ROOT}}`을 그대로 둔다. 메인 세션이 skill 로드 직후 `realpath` 기반 bash 한 줄로 runtime resolve한다 (`orchestrate-python-lib/SKILL.md` §0 참조).
+- 정본에 `{{HARNESS_ROOT}}`을 그대로 둔다. 메인 세션이 skill 로드 직후 `git rev-parse --show-toplevel` 한 줄로 runtime resolve한다 (`orchestrate-python-lib/SKILL.md` §0 참조).
 - 어떤 커밋에서도 `{{HARNESS_ROOT}}`이 `/home/obigo/...` 같은 절대 경로로 치환되어 들어가면 **버그**다. PR/커밋 검토 시 확인할 것.
-- `install.sh`은 심볼릭 링크만 만든다. 파일 내용을 손대지 않는다.
+- `install.sh`은 파일 내용을 손대지 않는다 (placeholder 치환 금지, A4).
 
 ### 2-2. `{HARNESS_ROOT}`, `{run_dir}`, `{run_id}`, `{target_repo_path}`, `{lib_name}`, `{branch_name}` — 프롬프트용, **매 호출 시 치환**
 
@@ -33,12 +33,11 @@
 - 따라서 정본 프롬프트에도 이 토큰은 그대로 둔다.
 - 치환은 `str.format`이 아니라 `str.replace`이므로 프롬프트에 중괄호 예시 코드를 넣어도 안전하다. 새 토큰을 추가할 거면 `call_headless()` 안의 `.replace(...)` 체인에도 추가하고 `validate_harness.py`가 자동으로 사용처/누락을 검증한다.
 
-## 3. Skill 정본과 symlink
+## 3. Skill 위치 — project-local
 
-- 정본: `skills/<name>/SKILL.md`. 편집은 여기서만 한다.
-- `~/.claude/skills/<name>`은 `install.sh`이 만드는 **심볼릭 링크**. 절대 직접 파일을 만들지 말 것. (Amendment A1)
-- 하네스 디렉토리를 `mv`로 옮긴 뒤에는 `./install.sh`만 다시 돌리면 symlink가 새 경로로 갱신된다. 복잡한 재설치 절차 없음.
-- `uninstall.sh`은 symlink만 제거하고 소스는 건드리지 않는다.
+- 정본 = 위치: `.claude/skills/<name>/SKILL.md`.
+- 이 디렉토리는 Claude Code의 **project-local skill** 규약에 따라 CWD 가 이 harness 레포(또는 그 하위)일 때만 로드된다. 다른 세션·다른 프로젝트의 컨텍스트를 오염시키지 않는 것이 의도.
+- 하네스를 `mv`로 옮겨도 별도 재설치 불필요 — skill 디렉토리가 같이 따라온다. `./install.sh`은 git hooks 설정만 다시 거는 용도.
 
 ## 4. 파일별 책임 (어디를 고쳐야 하는가)
 
@@ -47,11 +46,11 @@
 | 파이프라인 단계 내부 행동 (한 stage가 뭘 만드는지) | `scripts/prompts/<stage>.md` |
 | 단계 간 라우팅, 게이트 로직, 루프/에스컬레이션 | `scripts/run.py` |
 | 캡(cap), 임계치, 정체 감지 파라미터 | `scripts/config.yaml` |
-| Interview 변수·대화 흐름 | `skills/deep-interview-python-lib/SKILL.md` + `docs/interview-guide.md` (두 곳 동기화) |
-| 생성 라이브러리의 고정 규약 | `skills/python-library-conventions/SKILL.md` + `docs/tacit-knowledge.md` (두 곳 동기화) |
-| 오케스트레이션 진입 흐름, 사용자 대응 | `skills/orchestrate-python-lib/SKILL.md` |
+| Interview 변수·대화 흐름 | `.claude/skills/deep-interview-python-lib/SKILL.md` + `docs/interview-guide.md` (두 곳 동기화) |
+| 생성 라이브러리의 고정 규약 | `.claude/skills/python-library-conventions/SKILL.md` + `docs/tacit-knowledge.md` (두 곳 동기화) |
+| 오케스트레이션 진입 흐름, 사용자 대응 | `.claude/skills/orchestrate-python-lib/SKILL.md` |
 | 전체 단계 정의표 | `docs/stages.md` |
-| 설치/제거 동작 | `install.sh` / `uninstall.sh` |
+| Git hooks 설정 (재설치 트리거) | `install.sh` |
 | Preflight 검사 항목 | `scripts/preflight.py` (독립 파일, Amendment A3) |
 | `state.json` 초기 스키마 | `scripts/init_run.py` |
 | 기계 게이트 실행 (pytest/mypy/ruff/coverage) | `scripts/gates.py` (Amendment A7, 0-2 clean separation) |
@@ -68,11 +67,13 @@
 - 커밋 전에 `git status`로 확인. `outputs/` 하위 파일이 추적 대상에 나타나면 뭔가 잘못된 것.
 - 테스트/디버깅 중 만든 run은 지워도 무방하다 (`rm -rf outputs/<run-id>/`). 상태는 각 run 안에 자기완결적으로 있다.
 
-## 6. `install.sh` / `uninstall.sh` 계약
+## 6. `install.sh` 계약
 
-- **`install.sh`**: 심볼릭 링크 생성/갱신만. 이미 링크가 올바른 위치를 가리키면 no-op. 깨진 링크나 이동 감지 시 교체. 파일 수정 금지.
-- **`uninstall.sh`**: symlink 제거. 소스 트리 그대로 둠. placeholder 복원 같은 건 하지 않는다 (정본에 placeholder가 원래 남아 있으므로 복원할 게 없다).
-- 두 스크립트 모두 `set -euo pipefail` 유지. `install.sh`에 placeholder 치환 로직을 **다시 추가하지 말 것** (Plan Y는 기각됨, A4 참조).
+- **`install.sh`**: `core.hooksPath` 를 `.githooks` 로 설정하는 것이 유일한 책임. 파일 수정 금지.
+- `~/.claude/skills/` 로 symlink를 만드는 로직을 **다시 추가하지 말 것** (project-local skill로 이주한 후 의도적으로 제거됨, §3 참조).
+- `install.sh` 에 placeholder 치환 로직을 **다시 추가하지 말 것** (Plan Y는 기각됨, A4 참조).
+- `set -euo pipefail` 유지.
+- `uninstall.sh` 은 존재하지 않는다 — git hooks 만 다루므로 되돌릴 게 없음. 필요하면 `git config --unset core.hooksPath` 한 줄.
 
 ## 7. Headless 호출 구조 (수정 시 주의점)
 
@@ -91,7 +92,6 @@
 ## 9. 피해야 할 변경
 
 - `install.sh`에 sed 치환 부활 — A4가 명시적으로 기각한 방식.
-- `~/.claude/skills/` 아래에 하네스 파일을 직접 생성 — symlink 위반 (A1).
 - `scripts/init_run.py`에 preflight 로직 섞기 — A3가 분리한 이유가 있음.
 - `{run_dir}/outputs/...`처럼 outputs 안에 또 outputs를 만드는 경로 계산 — `HARNESS_ROOT/outputs/<run-id>/`이 정답.
 - 생성 라이브러리용 규약을 이 레포 루트에 끌어다 놓기 (pyproject.toml 등).
