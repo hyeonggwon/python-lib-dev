@@ -74,13 +74,15 @@
     "gateB": null
   },
   "preflight_done": false,
-  "branch_name": null
+  "branch_name": null,
+  "escalation_triggers": []
 }
 ```
 
 - `gate_decisions[gateX]`: `null` = pending, `"approved"` = 통과, `"rewrite"` = 재작업(해당 단계 재실행), `"approved_with_breaking"` = 게이트 B evolve 전용.
 - `verdict_history`는 s5 종료 시마다 append. 정체 감지에 사용.
 - `branch_name`은 evolve 모드에서 interview가 확정한 브랜치명을 저장. 사용자가 커스텀 이름(`feat/...` 등) 을 주면 그 문자열을 저장. **기본값(`harness/<run-id>`) 으로 OK 하면 `null`** — `run.py` preflight 가 `f"harness/{run_id}"` 로 채운다. new 모드는 `null`.
+- `escalation_triggers`는 escalate() 마다 append 되는 리스트. 한 run 에서 여러 종류의 에스컬레이션을 거쳤다면 모두 보존되어 0-5 cross-run 분석에 반영된다. terminal entry(`outputs/.index.jsonl`) 에는 리스트와 함께 legacy 단수 필드(`escalation_trigger` = 마지막 항목) 도 호환을 위해 같이 기록된다.
 
 ---
 
@@ -198,7 +200,7 @@ script는 이 파일 생성 후 종료 코드 2로 정지.
 ### 트리거별 권장 액션
 
 - `cap_minor_loop` / `cap_major_loop`: `force_continue` 로 해당 카운터 리셋. 같은 패턴이 또 안 풀리면 `resume_from_design` 으로 격상.
-- `cap_total_stages`: `force_continue` 로 `total_stages` 리셋 가능하나, 이 cap 까지 왔다는 건 진행이 막혔다는 뜻. 대개 `resume_from_plan` / `resume_from_design` 가 맞음.
+- `cap_total_stages`: PASS verdict 에서는 자동 면제(s7/s8 만 남았으면 그대로 종료까지 진행). 그 외 verdict 에서만 트리거된다. `force_continue` 로 `total_stages` 리셋 가능하나, 이 cap 까지 왔다는 건 진행이 막혔다는 뜻. 대개 `resume_from_plan` / `resume_from_design` 가 맞음.
 - `stagnation`: **`force_continue` 비추천**. 정체는 verdict_history 의 다수 항목 overlap 으로 감지되므로 한 번 pop 한다고 풀리지 않고 다음 s6 에서 곧장 재escalate 된다. `resume_from_design` 또는 `resume_from_plan` 로 새로운 출발점에서 verdict_history 를 비우는 것이 정답.
 - `critical_verdict` / `llm_pass_despite_failing_gates`: `force_continue` 부적절. `resume_from_design` 또는 `abort`.
 

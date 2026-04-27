@@ -41,7 +41,7 @@ def main() -> int:
     # `status`/`current_stage`/`awaiting_input_schema`/`user_input`/`stage_outputs`
     # are baseline; `counters`/`overrides` are domain-specific per the spec.
     # Domain extensions: mode/target_repo_path/lib_name/etc., verdict_history (0-4),
-    # gate_decisions (per-gate state), preflight_done, branch_name, last_escalation_trigger.
+    # gate_decisions (per-gate state), preflight_done, branch_name, escalation_triggers.
     state = {
         "run_id": run_id,
         "harness": "python-lib-dev",
@@ -67,12 +67,16 @@ def main() -> int:
         # Pre-populate every gate slot the orchestrator may touch so the schema
         # is closed at init time. gate0 is evolve-only but the key still exists
         # in new mode (stays None). This matches how preflight_done /
-        # branch_name / last_escalation_trigger are declared up-front rather
+        # branch_name / escalation_triggers are declared up-front rather
         # than auto-created on first write.
         "gate_decisions": {"gate0": None, "gateA": None, "gateB": None},
         "preflight_done": False,
         "branch_name": None,
-        "last_escalation_trigger": None,
+        # List, not single value: a run can hit multiple distinct escalations
+        # before terminating (e.g. cap_minor_loop → resolved → stagnation).
+        # Cross-run pattern analysis (0-5) needs the full sequence, not just
+        # the most recent one, to spot recurring failure modes accurately.
+        "escalation_triggers": [],
     }
     (run_dir / "state.json").write_text(json.dumps(state, indent=2))
     print(str(run_dir))

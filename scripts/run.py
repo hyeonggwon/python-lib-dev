@@ -23,6 +23,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -93,20 +94,31 @@ def clear_awaiting(state: dict[str, Any], user_input: dict[str, Any] | None = No
 
 # ---------- cross-run evidence (0-5) ----------
 
-def append_index_entry(state: dict[str, Any], final_status: str, escalation_trigger: str | None = None) -> None:
+def append_index_entry(state: dict[str, Any], final_status: str, escalation_triggers: list[str] | None = None) -> None:
     """Append one line to outputs/.index.jsonl with this run's outcome.
 
     See harness-builder SKILL.md §0-5: cross-run pattern accumulation is the
     evidence layer that lets a human (not the harness) patch prompts/caps.
+
+    `escalation_triggers` is a list because a single run can hit several
+    distinct triggers before terminating (e.g. cap_minor_loop → resolved →
+    stagnation). Recording only the most-recent one underrepresents recurring
+    patterns. The legacy `escalation_trigger` (singular) field is also written
+    for backward compat with index entries already on disk.
     """
     index_path = HARNESS_ROOT / "outputs" / ".index.jsonl"
     index_path.parent.mkdir(exist_ok=True)
+    triggers = list(escalation_triggers or [])
     entry = {
         "run_id": state["run_id"],
         "mode": state.get("mode"),
         "final_status": final_status,
         "counters": state.get("counters", {}),
-        "escalation_trigger": escalation_trigger,
+        "escalation_triggers": triggers,
+        # Legacy field: consumers reading older `.index.jsonl` lines mixed
+        # with newer ones can fall through to this if the list is missing.
+        # Stores the *last* trigger to match prior semantics.
+        "escalation_trigger": triggers[-1] if triggers else None,
         "completed_at": dt.datetime.now().isoformat(timespec="seconds"),
     }
     with index_path.open("a", encoding="utf-8") as f:
@@ -150,21 +162,30 @@ def format_cross_run_pattern_block(current_run_id: str, limit: int = 10) -> str:
     if not entries:
         return "_no prior runs indexed — this is the first recorded run._\n"
 
+    def _entry_triggers(e: dict[str, Any]) -> list[str]:
+        # Prefer the new list field; fall back to the legacy singular for old
+        # index entries written before escalation_triggers existed.
+        lst = e.get("escalation_triggers")
+        if isinstance(lst, list) and lst:
+            return [str(t) for t in lst if t]
+        single = e.get("escalation_trigger")
+        return [str(single)] if single else []
+
     trigger_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
     for e in entries:
         status = e.get("final_status") or "unknown"
         status_counts[status] = status_counts.get(status, 0) + 1
-        trig = e.get("escalation_trigger")
-        if trig:
+        for trig in _entry_triggers(e):
             trigger_counts[trig] = trigger_counts.get(trig, 0) + 1
 
     lines = [f"Looking at the previous {len(entries)} run(s) (newest last):", ""]
     for e in entries:
+        trigs = _entry_triggers(e)
+        trig_str = f" [triggers: {', '.join(trigs)}]" if trigs else ""
         lines.append(
             f"- `{e.get('run_id', '?')}` ({e.get('mode', '?')}) → "
-            f"{e.get('final_status', '?')}"
-            + (f" [trigger: {e.get('escalation_trigger')}]" if e.get("escalation_trigger") else "")
+            f"{e.get('final_status', '?')}{trig_str}"
         )
     lines.append("")
     lines.append("**Status counts:** " + ", ".join(f"{k}={v}" for k, v in status_counts.items()))
@@ -291,6 +312,17 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
                 result[key] = textwrap.dedent("\n".join(buf)).strip()
                 continue
             else:
+                # Strip a trailing inline comment so values like
+                # `decision: approved  # OK to ship` parse to "approved",
+                # not "approved  # OK to ship". Pattern is whitespace-then-`#`
+                # so URLs / fragments / values that legitimately contain `#`
+                # without a leading space (e.g. `key: foo#bar`) are preserved.
+                # Block-scalar values go through the `if rest == "|":` branch
+                # above and never reach here, so multi-line user feedback
+                # that contains `#` lines is unaffected.
+                m = re.search(r"\s+#(\s|$)", rest)
+                if m:
+                    rest = rest[: m.start()].rstrip()
                 result[key] = rest
         i += 1
     return result
@@ -436,20 +468,35 @@ def stage_preflight(run_dir: Path, state: dict[str, Any]) -> bool:
     r = subprocess.run(preflight, check=False)
     if r.returncode != 0:
         return False
-    # evolve: create harness branch (default naming or user-chosen)
+    # evolve: create harness branch (default naming or user-chosen).
+    # Idempotent: if the branch already exists (e.g. a prior preflight succeeded
+    # then crashed before saving preflight_done=True), plain `checkout` it
+    # instead of `checkout -b` which would fail with "branch already exists".
+    # The narrow window matters because preflight is unrecoverable otherwise —
+    # the user has to manually delete the branch every time a stage crashes
+    # before its first save_state.
     if state["mode"] == "evolve":
         branch = state.get("branch_name") or f"harness/{state['run_id']}"
+        ref_check = subprocess.run(
+            ["git", "-C", state["target_repo_path"], "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+            capture_output=True, text=True, check=False,
+        )
+        sub: list[str]
+        if ref_check.returncode == 0:
+            # Branch exists — switch to it. Safe even if we're already on it
+            # (git checkout to the current branch is a no-op).
+            sub = ["git", "-C", state["target_repo_path"], "checkout", branch]
+        else:
+            sub = ["git", "-C", state["target_repo_path"], "checkout", "-b", branch]
         try:
-            subprocess.run(
-                ["git", "-C", state["target_repo_path"], "checkout", "-b", branch],
-                check=True, capture_output=True, text=True,
-            )
+            subprocess.run(sub, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             print(
-                f"error: failed to create branch '{branch}' in {state['target_repo_path']}:\n"
+                f"error: failed to switch to branch '{branch}' in {state['target_repo_path']}:\n"
                 f"  {(e.stderr or e.stdout or '').strip()}\n"
-                f"  hint: branch may already exist; delete it or choose a different branch_name "
-                f"in interview/mode.json and rerun.",
+                f"  hint: if the branch exists but points somewhere unexpected, inspect with "
+                f"`git -C {state['target_repo_path']} log {branch}` and decide whether to "
+                f"delete it or pick a different branch_name in interview/mode.json.",
                 file=sys.stderr,
             )
             return False
@@ -523,7 +570,19 @@ def stage_headless_with_gate(
         return next_stage_on_approve
     elif decision.get("decision") == "rewrite":
         # Delete stage output; rerun stage with feedback next time.
-        feedback = decision.get("feedback", "")
+        # Empty feedback is hard-fail — the schema declares feedback required
+        # for rewrite, and silently re-running a stage with no rewrite reason
+        # wastes a stage budget and gives the LLM nothing to fix. Match the
+        # harness's fail-fast stance for gate decisions (CLAUDE.md §1).
+        feedback = (decision.get("feedback") or "").strip()
+        if not feedback:
+            print(
+                f"error: {gate}.decision.md: 'rewrite' requires a non-empty 'feedback:' "
+                f"field describing what to fix. Without it, the stage would be re-run "
+                f"with no context. Add a `feedback: |` block and rerun.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         write_feedback(
             run_dir / f"{stage}" / "feedback.md",
             f"# Gate {gate} rewrite feedback\n\n{feedback}\n",
@@ -749,10 +808,15 @@ def stage_s6_decide(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
     # caps
     counters = state["counters"]
     caps = cfg["caps"]
-    if counters["total_stages"] >= caps["total_stages"]:
-        return escalate(run_dir, state, "cap_total_stages", verdict)
-
     v = verdict["verdict"]
+    # cap_total_stages is a runaway-loop guard, not a delivery blocker. If we
+    # reached this cap with a PASS verdict the work is actually done — only
+    # s7 (docs) + s8 (delivery write) remain. Escalating here would force the
+    # user to do `force_continue` with reset_counters=[total_stages] purely to
+    # let a successful run finish, which the harness was built to avoid. Keep
+    # the cap honest for non-PASS verdicts (those would still loop).
+    if counters["total_stages"] >= caps["total_stages"] and v != "PASS":
+        return escalate(run_dir, state, "cap_total_stages", verdict)
     if v == "PASS":
         (run_dir / "s6").mkdir(exist_ok=True)
         (run_dir / "s6" / "decision.json").write_text(json.dumps({"action": "advance", "target": "s7"}, indent=2))
@@ -930,7 +994,14 @@ def escalate(run_dir: Path, state: dict[str, Any], trigger: str, verdict: dict[s
     # record it. Previously we appended an "escalated" row here and another
     # "<final_verdict>" row later, double-counting the same run in cross-run
     # stats. Now we record exactly one entry per run at its terminal state.
-    state["last_escalation_trigger"] = trigger
+    # List, not single value: a single run can hit multiple distinct
+    # escalations (cap_minor → resolved → stagnation → resolved → PASS), and
+    # cross-run analysis needs the full sequence to spot recurring patterns.
+    triggers = state.setdefault("escalation_triggers", [])
+    if not isinstance(triggers, list):  # legacy state.json migration
+        triggers = []
+        state["escalation_triggers"] = triggers
+    triggers.append(trigger)
     set_awaiting(state, ESCALATION_DECISION_SCHEMA)
     save_state(run_dir, state)
     print(f"[run.py] escalation written to {path}. Resolve and rerun with --resume.", file=sys.stderr)
@@ -954,7 +1025,7 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
         append_index_entry(
             state,
             final_status="aborted",
-            escalation_trigger=state.get("last_escalation_trigger"),
+            escalation_triggers=state.get("escalation_triggers") or [],
         )
         # Clean up the resolved escalation files even on abort so a curious
         # reader doesn't see "awaiting" artifacts on a terminal run.
@@ -998,6 +1069,12 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
         state["gate_decisions"]["gateB"] = None
         state["counters"]["minor_loop"] = 0
         state["counters"]["major_loop"] = 0
+        # Same reasoning as resume_from_plan: a fresh design produces a
+        # different review cycle, so prior verdicts are no longer
+        # representative. Without this, stagnation re-triggers immediately
+        # on the stale evidence the user just escaped from. docs/stages.md
+        # explicitly promises this clear; keep code and doc aligned.
+        state["verdict_history"] = []
         propagate_escalation_feedback(run_dir, dec, "s2_design", action)
         next_stage = "s2"
     elif action == "force_continue":
@@ -1036,6 +1113,29 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
         # escalation — otherwise s6 will re-escalate on the same cap.
         if state.get("verdict_history"):
             state["verdict_history"].pop()
+        # Propagate the user's escalation feedback into whichever stage s6 is
+        # about to route to (MINOR → s4_implement, MAJOR → s2_design). Without
+        # this, the user types reasoning into escalation.decision.md but the
+        # next s5 review never sees it — same silent-drop class of bug as
+        # resume_from_*. Routing target is derived from the persisted verdict.
+        # PASS/CRITICAL force_continue paths don't get feedback propagation:
+        # PASS routes to s7 (no feedback dir), and force_continue on CRITICAL/
+        # llm_pass_despite_failing_gates is documented as inappropriate
+        # (docs/stages.md §트리거별 권장 액션) — feedback would be misdirected.
+        verdict_path = run_dir / "s5" / "verdict.yaml"
+        if verdict_path.exists():
+            try:
+                v = (yaml.safe_load(verdict_path.read_text()) or {}).get("verdict")
+            except yaml.YAMLError:
+                v = None
+            loop_stage_for_feedback = {
+                "MINOR": "s4_implement",
+                "MAJOR": "s2_design",
+            }.get(v) if isinstance(v, str) else None
+            if loop_stage_for_feedback:
+                propagate_escalation_feedback(
+                    run_dir, dec, loop_stage_for_feedback, action
+                )
         next_stage = state.get("current_stage") or "s5"
     else:
         print(f"error: unknown escalation action: {action}", file=sys.stderr)
@@ -1292,13 +1392,13 @@ def write_delivery(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) ->
 
     (run_dir / "delivery.md").write_text(body)
     final_status = verdict.get("verdict", "UNKNOWN") if verdict else "UNKNOWN"
-    # Single terminal index entry per run. `last_escalation_trigger` is set by
-    # escalate() and persists across the escalation resolution; if this run
-    # never escalated, it's simply None.
+    # Single terminal index entry per run. `escalation_triggers` is appended
+    # by escalate() each time a different trigger fires and persists across
+    # escalation resolutions; if this run never escalated, it's an empty list.
     append_index_entry(
         state,
         final_status=final_status,
-        escalation_trigger=state.get("last_escalation_trigger"),
+        escalation_triggers=state.get("escalation_triggers") or [],
     )
 
 
