@@ -164,6 +164,25 @@ def main() -> int:
                     "(rewrite/loop feedback would not reach the headless)"
                 )
 
+        # 3b. Detect the easy-to-make typo: writing the *output* directory
+        # short-name (s1, s2, s4) when referring to feedback. Output dirs
+        # (s1/plan.md, s2/design.md, s4/changes.patch) and feedback dirs
+        # (s1_plan/feedback.md, s2_design/feedback.md, s4_implement/feedback.md)
+        # diverge by design — see CLAUDE.md §4. A reference to
+        # `{run_dir}/<short>/feedback.md` is silently wrong because run.py
+        # writes to the long form, so the headless never sees it.
+        for long_name in STAGES_WITH_FEEDBACK:
+            short_name = long_name.split("_", 1)[0]
+            if short_name == long_name:
+                continue
+            wrong = f"{{run_dir}}/{short_name}/feedback.md"
+            if wrong in text:
+                issues.append(
+                    f"[feedback] {prompt_path.name}: references '{wrong}' but run.py writes "
+                    f"to '{{run_dir}}/{long_name}/feedback.md' "
+                    "(stage_headless_with_gate / preserve_loop_feedback use the long-name dir)"
+                )
+
     # 4. Cross-checks
     for stage in stage_tools:
         if stage not in prompt_stems:

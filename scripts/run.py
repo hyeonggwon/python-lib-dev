@@ -230,15 +230,32 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
                 # indentation by collecting raw lines and running textwrap.dedent
                 # at the end — avoids flattening code snippets that the user
                 # pastes into feedback.
+                #
+                # If a non-blank line appears at the wrong indent (e.g. 1 space)
+                # we exit hard rather than silently truncate the block — losing
+                # gate-decision feedback to a typo is the kind of failure mode
+                # the harness was built to prevent.
                 buf: list[str] = []
                 i += 1
+                block_start_lineno = i + 1  # 1-indexed for the error message
                 while i < len(lines):
                     raw = lines[i]
                     if raw.startswith("  ") or raw.startswith("\t") or not raw.strip():
                         buf.append(raw)
                         i += 1
-                    else:
+                    elif ":" in raw and not raw.startswith(" ") and not raw.startswith("\t"):
+                        # New top-level key — block ends here. Normal exit.
                         break
+                    else:
+                        print(
+                            f"error: {p}: line {i + 1}: under-indented continuation "
+                            f"of '{key}: |' block (need 2+ spaces or tab). "
+                            f"This would silently drop the rest of '{key}'. "
+                            f"Re-indent the block (started at line {block_start_lineno}) "
+                            f"and re-run.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
                 result[key] = textwrap.dedent("\n".join(buf)).strip()
                 continue
             else:
@@ -475,8 +492,10 @@ def stage_headless_with_gate(
     elif decision.get("decision") == "rewrite":
         # Delete stage output; rerun stage with feedback next time.
         feedback = decision.get("feedback", "")
-        (run_dir / f"{stage}").mkdir(exist_ok=True)
-        (run_dir / f"{stage}" / "feedback.md").write_text(f"# Gate {gate} rewrite feedback\n\n{feedback}\n")
+        write_feedback(
+            run_dir / f"{stage}" / "feedback.md",
+            f"# Gate {gate} rewrite feedback\n\n{feedback}\n",
+        )
         if output_marker.exists():
             output_marker.unlink()
         # clear old decision to block until the stage reruns and a new gate cycle opens
@@ -723,6 +742,23 @@ def clear_stage_outputs(run_dir: Path, stages: list[str]) -> None:
             shutil.rmtree(d)
 
 
+def write_feedback(target_path: Path, new_content: str) -> None:
+    """Write new_content to feedback.md, preserving prior content if any.
+
+    Both gate rewrites and MINOR/MAJOR loops can target the same
+    `<stage>/feedback.md` path (stage_headless_with_gate writes on rewrite,
+    preserve_loop_feedback writes on loop). When both fire across iterations
+    a naive `write_text` silently drops the earlier reason. We instead
+    prepend the newer entry and keep the older one beneath a separator so
+    the consuming stage sees the full chain of "why this is being re-run".
+    """
+    target_path.parent.mkdir(exist_ok=True)
+    if target_path.exists():
+        prior = target_path.read_text()
+        new_content = f"{new_content}\n\n---\n\n# Prior feedback (kept for context)\n\n{prior}"
+    target_path.write_text(new_content)
+
+
 def preserve_loop_feedback(run_dir: Path, loop_stage: str) -> None:
     """Write s5/review.md + verdict.yaml to {run_dir}/{loop_stage}/feedback.md
     before the upcoming clear_stage_outputs wipes s5.
@@ -740,13 +776,12 @@ def preserve_loop_feedback(run_dir: Path, loop_stage: str) -> None:
     if not review.exists() and not verdict.exists():
         return
     target_dir = run_dir / loop_stage
-    target_dir.mkdir(exist_ok=True)
     parts = [f"# Feedback from prior s5 review (loop into {loop_stage})\n"]
     if verdict.exists():
         parts.append("## verdict.yaml\n\n```yaml\n" + verdict.read_text() + "\n```\n")
     if review.exists():
         parts.append("## review.md\n\n" + review.read_text() + "\n")
-    (target_dir / "feedback.md").write_text("\n".join(parts))
+    write_feedback(target_dir / "feedback.md", "\n".join(parts))
 
 
 def escalate(run_dir: Path, state: dict[str, Any], trigger: str, verdict: dict[str, Any]) -> str:

@@ -64,9 +64,15 @@ def main() -> int:
         },
         "counters": {"minor_loop": 0, "major_loop": 0, "total_stages": 0},
         "verdict_history": [],
-        "gate_decisions": {},
+        # Pre-populate every gate slot the orchestrator may touch so the schema
+        # is closed at init time. gate0 is evolve-only but the key still exists
+        # in new mode (stays None). This matches how preflight_done /
+        # branch_name / last_escalation_trigger are declared up-front rather
+        # than auto-created on first write.
+        "gate_decisions": {"gate0": None, "gateA": None, "gateB": None},
         "preflight_done": False,
         "branch_name": None,
+        "last_escalation_trigger": None,
     }
     (run_dir / "state.json").write_text(json.dumps(state, indent=2))
     print(str(run_dir))
