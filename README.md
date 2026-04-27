@@ -38,11 +38,13 @@ Claude Code 세션</br>
 
 ```
 python-lib-dev/
-  install.sh / uninstall.sh   # symlink 설치/제거
+  install.sh / uninstall.sh   # symlink 설치/제거 + core.hooksPath 설정
   scripts/
     init_run.py               # run 디렉토리 + state.json 초기화
     preflight.py              # uv / git / claude / target_repo_path 검증
-    run.py                    # 메인 오케스트레이터
+    run.py                    # 메인 오케스트레이터 (게이트, 루프, 에스컬레이션)
+    gates.py                  # 기계 게이트 실행 (pytest / mypy / ruff / coverage)
+    validate_harness.py       # 프롬프트 ↔ STAGE_TOOLS / 치환 / feedback 경로 drift 검사
     config.yaml               # 캡, 임계치, 정체 감지 파라미터
     prompts/                  # s0..s7 프롬프트 정본
   skills/                     # install.sh이 ~/.claude/skills/로 symlink
@@ -50,6 +52,7 @@ python-lib-dev/
     deep-interview-python-lib/
     python-library-conventions/
   docs/                       # task-spec, stages, interview-guide, tacit-knowledge, discussion-log
+  .githooks/pre-commit        # validate_harness.py 를 커밋 전 자동 실행
   outputs/                    # run 산출물 (.gitignore)
 ```
 

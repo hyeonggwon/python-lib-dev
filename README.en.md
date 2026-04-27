@@ -40,11 +40,13 @@ Stage definitions, state/verdict schemas, and gate formats are in `docs/stages.m
 
 ```
 python-lib-dev/
-  install.sh / uninstall.sh   # symlink install/uninstall
+  install.sh / uninstall.sh   # symlink install/uninstall + core.hooksPath setup
   scripts/
     init_run.py               # initializes run directory + state.json
     preflight.py              # validates uv / git / claude / target_repo_path
-    run.py                    # main orchestrator
+    run.py                    # main orchestrator (gates, loops, escalation)
+    gates.py                  # mechanical gates (pytest / mypy / ruff / coverage)
+    validate_harness.py       # drift checks: prompts ↔ STAGE_TOOLS / placeholders / feedback paths
     config.yaml               # caps, thresholds, stall detection params
     prompts/                  # source prompts for s0..s7
   skills/                     # install.sh symlinks these into ~/.claude/skills/
@@ -52,6 +54,7 @@ python-lib-dev/
     deep-interview-python-lib/
     python-library-conventions/
   docs/                       # task-spec, stages, interview-guide, tacit-knowledge, discussion-log
+  .githooks/pre-commit        # runs validate_harness.py before each commit
   outputs/                    # run artifacts (.gitignore)
 ```
 

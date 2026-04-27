@@ -25,13 +25,13 @@
 - 어떤 커밋에서도 `{{HARNESS_ROOT}}`이 `/home/obigo/...` 같은 절대 경로로 치환되어 들어가면 **버그**다. PR/커밋 검토 시 확인할 것.
 - `install.sh`은 심볼릭 링크만 만든다. 파일 내용을 손대지 않는다.
 
-### 2-2. `{HARNESS_ROOT}`, `{run_dir}`, `{run_id}`, `{target_repo_path}`, `{lib_name}` — 프롬프트용, **매 호출 시 치환**
+### 2-2. `{HARNESS_ROOT}`, `{run_dir}`, `{run_id}`, `{target_repo_path}`, `{lib_name}`, `{branch_name}` — 프롬프트용, **매 호출 시 치환**
 
 대상 파일: `scripts/prompts/*.md`.
 
 - `run.py`의 `call_headless()`가 headless 호출 직전에 `str.replace`로 치환해 `{run_dir}/.prompts/<stage>.md`로 쓴다.
 - 따라서 정본 프롬프트에도 이 토큰은 그대로 둔다.
-- 치환은 `str.format`이 아니라 `str.replace`이므로 프롬프트에 중괄호 예시 코드를 넣어도 안전하다. 새 토큰을 추가할 거면 `run.py:135` 부근 치환 블록에도 추가할 것.
+- 치환은 `str.format`이 아니라 `str.replace`이므로 프롬프트에 중괄호 예시 코드를 넣어도 안전하다. 새 토큰을 추가할 거면 `call_headless()` 안의 `.replace(...)` 체인에도 추가하고 `validate_harness.py`가 자동으로 사용처/누락을 검증한다.
 
 ## 3. Skill 정본과 symlink
 
@@ -95,6 +95,7 @@
 - `scripts/init_run.py`에 preflight 로직 섞기 — A3가 분리한 이유가 있음.
 - `{run_dir}/outputs/...`처럼 outputs 안에 또 outputs를 만드는 경로 계산 — `HARNESS_ROOT/outputs/<run-id>/`이 정답.
 - 생성 라이브러리용 규약을 이 레포 루트에 끌어다 놓기 (pyproject.toml 등).
+- `mode.json.branch_name` 에 `"harness/<run-id>"` 같은 literal 문자열 저장 — `<run-id>` 가 그대로 git 브랜치명에 박힌다. 기본값일 때는 `null` 로 둬서 `run.py` preflight 가 `f"harness/{run_id}"` 로 채우게 할 것.
 
 ## 10. 참고 포인터
 
