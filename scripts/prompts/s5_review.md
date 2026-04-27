@@ -58,7 +58,7 @@ Use the exact schema below. No free-form text outside the specified fields. **Do
 
 ```yaml
 verdict: PASS            # PASS | MINOR | MAJOR | CRITICAL
-rationale: "One sentence stating the single most important reason for this verdict."
+rationale: "One sentence stating the single most important reason for this verdict."  # context-only
 issues:
   - severity: major      # blocker | major | minor
     stage_to_loop: implement   # implement | design | null

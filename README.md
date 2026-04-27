@@ -11,7 +11,7 @@
 ## Initialize
 
 ```bash
-uv pip install pyyaml    # 또는 pip install pyyaml, 최초 한 번만 실행
+uv pip install --system pyyaml    # 또는 pip install --user pyyaml, 최초 한 번만 실행
 ./install.sh             # ~/.claude/skills/ symlink 생성 스크립트, 최초 한 번만 실행
 ```
 
@@ -99,6 +99,6 @@ workspace/                    # new 모드 산출물 (실제 라이브러리 본
 - `uv`
 - `git`
 - `Python 3.10+`
-- `PyYAML` (`run.py`가 `config.yaml` 파싱에 사용. `uv pip install pyyaml` 또는 `pip install pyyaml`)
+- `PyYAML` (`run.py`가 `config.yaml` 파싱에 사용. `uv pip install --system pyyaml` 또는 `pip install --user pyyaml`. modern uv 는 venv 없이는 `--system` 없이 거부함)
 
 생성되는 라이브러리 쪽 고정 스택: `uv` · `hatchling` · `pytest` · `ruff` · `mypy --strict` · `src/` 레이아웃 · Google docstring · Conventional Commits · GitHub Actions 3.10/3.11/3.12/3.13.

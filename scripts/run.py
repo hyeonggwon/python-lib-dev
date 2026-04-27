@@ -206,6 +206,19 @@ def write_gate_request(run_dir: Path, gate: str, title: str, context: str, optio
     (run_dir / f"{gate}.request.md").write_text(body)
 
 
+# Union of all top-level keys any gate.decision.md schema accepts (see
+# GATE_DECISION_SCHEMA, GATE_DECISION_SCHEMA_EVOLVE_DESIGN, ESCALATION_DECISION_SCHEMA
+# above). Used by read_gate_decision to distinguish a legitimate next-key line
+# from "user pasted feedback that happened to start with `Word: ...` at column 0",
+# which previously got silently treated as a new top-level key — truncating the
+# rest of the |-block. Hard-failing on unknown keys matches the harness's
+# fail-fast stance for gate decisions (CLAUDE.md §1).
+KNOWN_GATE_KEYS: set[str] = {
+    "decision", "feedback", "breaking_notes",
+    "action", "reset_counters",
+}
+
+
 def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
     p = run_dir / f"{gate}.decision.md"
     if not p.exists():
@@ -244,8 +257,27 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
                         buf.append(raw)
                         i += 1
                     elif ":" in raw and not raw.startswith(" ") and not raw.startswith("\t"):
-                        # New top-level key — block ends here. Normal exit.
-                        break
+                        # Looks like a new top-level key. Only treat it as a
+                        # legitimate block terminator if the key is one we
+                        # actually understand. Otherwise it's almost certainly
+                        # user-pasted feedback content that starts with a colon
+                        # at column 0 (e.g. "Re: previous review", "Note: ..."),
+                        # and silently ending the block here would drop the
+                        # rest of the user's feedback. Match harness fail-fast.
+                        candidate_key = raw.split(":", 1)[0].strip()
+                        if candidate_key in KNOWN_GATE_KEYS:
+                            break
+                        print(
+                            f"error: {p}: line {i + 1}: line `{raw.rstrip()}` is at "
+                            f"column 0 inside the `{key}: |` block but does not "
+                            f"start a known top-level key "
+                            f"(known: {', '.join(sorted(KNOWN_GATE_KEYS))}). "
+                            f"If this is feedback content, indent it 2+ spaces; "
+                            f"if you meant to start a new key, fix the spelling. "
+                            f"Block started at line {block_start_lineno}.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
                     else:
                         print(
                             f"error: {p}: line {i + 1}: under-indented continuation "
@@ -685,6 +717,31 @@ def stage_s6_decide(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
         if not gates_summary.get("all_passed", True) and verdict["verdict"] == "PASS":
             return escalate(run_dir, state, "llm_pass_despite_failing_gates", verdict)
 
+    # 0-2 guard #2: s5_review.md mandates loop_target ∈ {implement, design, null}
+    # bound to the verdict label. If the LLM emitted, say, MINOR with
+    # loop_target=design, routing to s4 (the MINOR target) silently contradicts
+    # the LLM's own diagnosis. Same fail-fast principle as the gates_ok guard:
+    # an internally inconsistent verdict is untrustworthy. Treat as escalate.
+    expected_loop_target: dict[str, set[str | None]] = {
+        "PASS":     {None},
+        "CRITICAL": {None},
+        "MINOR":    {"implement"},
+        "MAJOR":    {"design"},
+    }
+    v_label = verdict["verdict"]
+    if v_label in expected_loop_target:
+        lt = verdict.get("loop_target")
+        if isinstance(lt, str):
+            lt_norm: str | None = lt.strip().lower() or None
+            if lt_norm == "null":
+                lt_norm = None
+        else:
+            lt_norm = lt  # None or unexpected type — falls through to mismatch
+        if lt_norm not in expected_loop_target[v_label]:
+            return escalate(
+                run_dir, state, "verdict_loop_target_mismatch", verdict
+            )
+
     # stagnation
     if stagnation_triggered(state["verdict_history"], cfg):
         return escalate(run_dir, state, "stagnation", verdict)
@@ -757,6 +814,32 @@ def write_feedback(target_path: Path, new_content: str) -> None:
         prior = target_path.read_text()
         new_content = f"{new_content}\n\n---\n\n# Prior feedback (kept for context)\n\n{prior}"
     target_path.write_text(new_content)
+
+
+def propagate_escalation_feedback(
+    run_dir: Path, dec: dict[str, str], loop_stage: str, action: str
+) -> None:
+    """Write the user's escalation `feedback:` into `<loop_stage>/feedback.md`.
+
+    Without this, the feedback the user types into `escalation.decision.md`
+    only lands in `state.user_input` — which no stage prompt reads. The
+    resumed stage would re-run with the same context as the original run
+    plus an empty feedback file, defeating the point of resume_from_*.
+
+    Run AFTER clear_stage_outputs so the just-written feedback isn't wiped.
+    """
+    feedback = (dec.get("feedback") or "").strip()
+    if not feedback:
+        return
+    target_dir = run_dir / loop_stage
+    target_dir.mkdir(parents=True, exist_ok=True)
+    body = (
+        f"# Escalation feedback ({action})\n\n"
+        f"User-provided context for this resume, copied from "
+        f"`escalation.decision.md`:\n\n"
+        f"{feedback}\n"
+    )
+    write_feedback(target_dir / "feedback.md", body)
 
 
 def preserve_loop_feedback(run_dir: Path, loop_stage: str) -> None:
@@ -898,6 +981,12 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
         # keeping its issues in verdict_history would let stagnation detection
         # trip on pre-escalation evidence that no longer reflects the new plan.
         state["verdict_history"] = []
+        # Propagate the user's escalation feedback into the resumed stage. The
+        # escalation template invites `feedback: |` from the user; previously
+        # this string went into state["user_input"] only and no stage prompt
+        # ever read it, silently dropping the user's reasoning. Write it where
+        # s1 expects rewrite/loop feedback so the resumed stage actually sees it.
+        propagate_escalation_feedback(run_dir, dec, "s1_plan", action)
         next_stage = "s1"
     elif action == "resume_from_design":
         clear_stage_outputs(run_dir, [
@@ -909,12 +998,37 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
         state["gate_decisions"]["gateB"] = None
         state["counters"]["minor_loop"] = 0
         state["counters"]["major_loop"] = 0
+        propagate_escalation_feedback(run_dir, dec, "s2_design", action)
         next_stage = "s2"
     elif action == "force_continue":
-        for c in (dec.get("reset_counters", "") or "").replace("[", "").replace("]", "").split(","):
-            c = c.strip()
-            if c in state["counters"]:
-                state["counters"][c] = 0
+        # Accept any of: bare comma list (`minor_loop, major_loop`), JSON/YAML
+        # flow list (`["minor_loop", "major_loop"]`), or YAML block list. Try
+        # yaml.safe_load first (handles all three including quoted strings) and
+        # fall back to bare comma split for the legacy template form.
+        raw = dec.get("reset_counters", "") or ""
+        names: list[str] = []
+        try:
+            parsed = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            parsed = None
+        if isinstance(parsed, list):
+            names = [str(x).strip() for x in parsed if str(x).strip()]
+        elif isinstance(parsed, str):
+            names = [s.strip() for s in parsed.split(",") if s.strip()]
+        else:
+            names = [s.strip().strip('"').strip("'")
+                     for s in raw.replace("[", "").replace("]", "").split(",")
+                     if s.strip()]
+        unknown = [n for n in names if n not in state["counters"]]
+        if unknown:
+            print(
+                f"error: escalation.decision.md: reset_counters contains unknown "
+                f"counter name(s) {unknown}. Known: {sorted(state['counters'])}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        for c in names:
+            state["counters"][c] = 0
         # force_continue routes us back to s6, which re-reads the same verdict
         # and would append it to verdict_history a second time (inflating the
         # stagnation window). Pop the last entry so the re-append nets zero.

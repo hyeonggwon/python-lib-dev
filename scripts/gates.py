@@ -105,7 +105,13 @@ def gate_tests_and_coverage(
                 line_cov = float(percent) / 100
             covered = totals.get("covered_branches")
             num = totals.get("num_branches")
-            if covered is not None and num:
+            if num == 0:
+                # Code with no branches: branch coverage is vacuously satisfied.
+                # Without this special case, pure-data libraries (constants,
+                # dataclasses with no conditionals) would always fail the gate
+                # because branch_cov stays None and trips thresholds_met below.
+                branch_cov = 1.0
+            elif covered is not None and num is not None:
                 branch_cov = float(covered) / float(num)
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             pass

@@ -12,7 +12,7 @@ A Claude Code harness that builds or updates a single Python library through a p
 ## Initialize
 
 ```bash
-uv pip install pyyaml    # or pip install pyyaml, one-time only
+uv pip install --system pyyaml    # or pip install --user pyyaml, one-time only
 ./install.sh             # creates symlinks under ~/.claude/skills/, one-time only
 ```
 
@@ -101,6 +101,6 @@ See `CLAUDE.md` §5 for the mapping of what-to-edit-where.
 - `uv`
 - `git`
 - `Python 3.10+`
-- `PyYAML` (used by `run.py` to parse `config.yaml`. Install via `uv pip install pyyaml` or `pip install pyyaml`)
+- `PyYAML` (used by `run.py` to parse `config.yaml`. Install via `uv pip install --system pyyaml` or `pip install --user pyyaml`. Modern uv refuses `uv pip install` without `--system` when no venv is active.)
 
 Fixed stack for generated libraries: `uv` · `hatchling` · `pytest` · `ruff` · `mypy --strict` · `src/` layout · Google docstrings · Conventional Commits · GitHub Actions on 3.10/3.11/3.12/3.13.
