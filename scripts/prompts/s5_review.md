@@ -22,7 +22,8 @@ Mechanical verification (tests, mypy, ruff, coverage) has **already been run by 
    - `{run_dir}/gates/tests.json`, `mypy.json`, `ruff_check.json`, `ruff_format.json`, `coverage.json` — individual gate output tails for your reading
 9. `{run_dir}/s4/impl-notes.md` — informational only. You may use it to understand intent but **issues must be rooted in artifacts**, not in impl-notes.
 10. `{run_dir}/effective_thresholds.json` — **the resolved policy for this run** (config.yaml defaults + mode.json.overrides, already merged). Fields: `mode`, `line_coverage`, `branch_coverage`, `max_major_issues_new`, `max_major_issues_evolve`, `max_major_issues_applicable` (the one for the current mode). Use this file, **not** `config.yaml`, when comparing issue counts or cross-checking thresholds. Do not re-derive overrides yourself.
-11. `{HARNESS_ROOT}/docs/task-spec.md`, `{HARNESS_ROOT}/docs/tacit-knowledge.md` (background, non-authoritative).
+11. `{run_dir}/breaking-notes.md` (evolve only, **if present**) — user-sanctioned breaking changes from a gateB `approved_with_breaking` decision. If this file exists, treat the listed breakings as approved by the user; do **not** raise them as `Backward compatibility` issues. Breakings outside this list still count as drift.
+12. `{HARNESS_ROOT}/docs/task-spec.md`, `{HARNESS_ROOT}/docs/tacit-knowledge.md` (background, non-authoritative).
 
 You may **not** consult any other state or chat history. You may **not** re-run `uv run pytest/mypy/ruff` — those results are authoritative in the gate files.
 

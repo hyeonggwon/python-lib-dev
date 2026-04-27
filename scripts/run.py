@@ -245,7 +245,9 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
     if not p.exists():
         return None
     text = p.read_text()
-    # Very lightweight parser: line `key: value` or `key: |` followed by indented block.
+    # Very lightweight parser: `key: value`, `key: |` followed by indented
+    # block scalar, or bare `key:` followed by indented `- item` block list
+    # (normalized to comma-joined string for downstream consumers).
     result: dict[str, str] = {}
     lines = text.splitlines()
     i = 0
@@ -311,6 +313,36 @@ def read_gate_decision(run_dir: Path, gate: str) -> dict[str, str] | None:
                         sys.exit(1)
                 result[key] = textwrap.dedent("\n".join(buf)).strip()
                 continue
+            elif rest == "":
+                # Bare `key:` may be followed by an indented YAML block list
+                # (`  - item` lines). Without this branch the `- item` lines
+                # get filtered out at the top of the outer loop (no `:` in
+                # them) and the value silently becomes "" — most damaging
+                # for escalation force_continue, where reset_counters in
+                # block-list form would parse to nothing, leaving the
+                # escalation loop unable to break out of its cap.
+                list_buf: list[str] = []
+                j = i + 1
+                while j < len(lines):
+                    raw = lines[j]
+                    stripped = raw.strip()
+                    if not stripped or stripped.startswith("#"):
+                        j += 1
+                        continue
+                    if (raw.startswith("  ") or raw.startswith("\t")) and stripped.startswith("-"):
+                        list_buf.append(stripped[1:].strip().strip('"').strip("'"))
+                        j += 1
+                    else:
+                        break
+                if list_buf:
+                    # Normalize to the comma-separated form the downstream
+                    # handle_escalation_decision parser already accepts, so
+                    # block-list and flow-list inputs converge on the same
+                    # path.
+                    result[key] = ", ".join(list_buf)
+                    i = j
+                    continue
+                result[key] = ""
             else:
                 # Strip a trailing inline comment so values like
                 # `decision: approved  # OK to ship` parse to "approved",
@@ -599,6 +631,8 @@ def stage_headless_with_gate(
 
     if decision.get("decision") in ("approved", "approved_with_breaking"):
         state["gate_decisions"][gate] = decision["decision"]
+        if decision["decision"] == "approved_with_breaking":
+            propagate_gate_breaking_notes(run_dir, decision)
         clear_awaiting(state, user_input={f"{gate}.decision": decision})
         save_state(run_dir, state)
         return next_stage_on_approve
@@ -983,6 +1017,32 @@ def propagate_escalation_feedback(
         f"{feedback}\n"
     )
     write_feedback(target_dir / "feedback.md", body)
+
+
+def propagate_gate_breaking_notes(run_dir: Path, dec: dict[str, str]) -> None:
+    """Persist `breaking_notes` from a gateB `approved_with_breaking` decision.
+
+    Without this, the user-authored breaking_notes block invited by the
+    gateB request template only lands in `state.user_input["gateB.decision"]`
+    — and no stage prompt reads `state.user_input`. The s5 reviewer would
+    then flag user-sanctioned breakings as undeclared API drift, and the
+    s7 docs writer has no migration source to seed MIGRATION.md from.
+
+    Writes `{run_dir}/breaking-notes.md`, which s5_review.md (Inputs) and
+    s7_docs.md (Evolve breaking-change section) reference.
+    """
+    notes = (dec.get("breaking_notes") or "").strip()
+    if not notes:
+        return
+    body = (
+        "# Breaking changes (sanctioned at gateB)\n\n"
+        "User authored these notes when approving the gateB design with "
+        "breaking changes (`decision: approved_with_breaking`). s5 reviewer "
+        "should treat the listed breakings as approved (not violations), and "
+        "s7 should seed `MIGRATION.md` from this content.\n\n"
+        f"{notes}\n"
+    )
+    (run_dir / "breaking-notes.md").write_text(body)
 
 
 def preserve_loop_feedback(run_dir: Path, loop_stage: str) -> None:

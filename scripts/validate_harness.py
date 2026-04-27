@@ -288,6 +288,78 @@ def check_aux_outputs_referenced(aux_outputs: dict[str, list[str]]) -> list[str]
     return issues
 
 
+def check_gate_decision_fields_consumed() -> list[str]:
+    """Mirror of check_escalation_fields_consumed for gate-decision templates.
+
+    Same class of bug: stage_headless_with_gate's `options = (...)` /
+    `options += (...)` blocks invite the user to type `key: ...` fields into
+    `<gate>.decision.md`, but if run.py never reads `decision[<key>]` /
+    `dec[<key>]` the input gets silently dropped (it lands in
+    `state.user_input` which no prompt reads). Verify every templated key
+    has a consumer.
+    """
+    run_text = RUN_PY.read_text()
+    issues: list[str] = []
+    # Walk each `options = (` / `options += (` opener and find the matching
+    # `)` by paren-balance (string-literal-aware). A naive `.*?` regex stops
+    # at the first `)` inside a string like `"(evolve only; ...)\n"` and
+    # misses the rest of the template — exactly the kind of silent miss
+    # this validator is meant to catch.
+    blocks: list[str] = []
+    for opener in re.finditer(r"options\s*(?:=|\+=)\s*\(", run_text):
+        idx = opener.end()
+        depth = 1
+        in_str: str | None = None
+        escape = False
+        start = idx
+        while idx < len(run_text) and depth > 0:
+            c = run_text[idx]
+            if in_str:
+                if escape:
+                    escape = False
+                elif c == "\\":
+                    escape = True
+                elif c == in_str:
+                    in_str = None
+            else:
+                if c in ("'", '"'):
+                    in_str = c
+                elif c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        blocks.append(run_text[start:idx])
+                        break
+            idx += 1
+    if not blocks:
+        return ["[gate-decision] could not locate `options = (...)` template blocks in run.py"]
+    fields: set[str] = set()
+    for body in blocks:
+        for raw in body.splitlines():
+            line = raw.strip()
+            # Each templated line is a Python string literal: "key: value\n".
+            m = re.match(r'^"([a-z_][a-z_0-9]*)\s*:', line)
+            if m:
+                fields.add(m.group(1))
+    fields.discard("decision")  # always consumed by the if/elif on `decision.get("decision")`
+    for f_name in sorted(fields):
+        patterns = [
+            f'decision["{f_name}"]', f"decision['{f_name}']",
+            f'decision.get("{f_name}"', f"decision.get('{f_name}'",
+            f'dec["{f_name}"]', f"dec['{f_name}']",
+            f'dec.get("{f_name}"', f"dec.get('{f_name}'",
+        ]
+        if not any(p in run_text for p in patterns):
+            issues.append(
+                f"[gate-decision] gate template invites '{f_name}: ...' but run.py "
+                f"never reads decision[{f_name!r}] or dec[{f_name!r}]. The user's "
+                f"input would be silently dropped (state.user_input is not read by "
+                f"any stage prompt)."
+            )
+    return issues
+
+
 def check_escalation_fields_consumed() -> list[str]:
     run_text = RUN_PY.read_text()
     # Find write_escalation_request / equivalent template in run.py — the
@@ -469,7 +541,14 @@ def main() -> int:
     # fenced block and grepping run.py for each non-action field.
     issues.extend(check_escalation_fields_consumed())
 
-    # 7. README install commands ↔ tooling reality.
+    # 7. gate-decision template ↔ stage_headless_with_gate consumers.
+    # Same class of silent-drop bug as #6 but for gateA/B request templates
+    # (the `options = (...)` / `options += (...)` blocks). Catches e.g. a
+    # `breaking_notes: |` field added to the template without a corresponding
+    # `decision.get("breaking_notes")` consumer.
+    issues.extend(check_gate_decision_fields_consumed())
+
+    # 8. README install commands ↔ tooling reality.
     # Modern uv (>=0.4) refuses `uv pip install` without an active venv or
     # `--system`. The harness is meant to install pyyaml globally for the
     # operator, so a documented `uv pip install pyyaml` (no flag) breaks

@@ -17,7 +17,8 @@ Produce user-facing documentation consistent with the delivered code. No marketi
    - **new**: `{run_dir}/workspace/src/{lib_name}/`
    - **evolve**: `{target_repo_path}` source (HEAD on branch `{branch_name}`)
 7. `{run_dir}/s5/review.md` — anything the reviewer flagged about docs
-8. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
+8. `{run_dir}/breaking-notes.md` (evolve only, **if present**) — user-sanctioned breaking changes from a gateB `approved_with_breaking` decision; seed `MIGRATION.md` from this content
+9. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
 
 ## Where docs go
 
@@ -43,10 +44,11 @@ Do **not** generate `CLAUDE.md` for the delivered library. The user may or may n
 3. Appending a new entry to `CHANGELOG.md`:
    - Header `## [<new version>] — <date>` (version: pick the smallest semver bump that fits — patch for fixes, minor for non-breaking additions, major for breaking).
    - Bullet categories: Added / Changed / Deprecated / Removed / Fixed / Security (include only non-empty ones).
-4. If the run declared **any breaking change** (see `s1/plan.md` compatibility section and `s2/design.md` Breaking changes), create `{target_repo_path}/MIGRATION.md` (or append to an existing one) with:
+4. If the run declared **any breaking change** (see `s1/plan.md` compatibility section, `s2/design.md` Breaking changes, and `{run_dir}/breaking-notes.md` if it exists), create `{target_repo_path}/MIGRATION.md` (or append to an existing one) with:
    - Which public symbols broke
    - Before/after code snippets
    - Deprecation timeline if there is one
+   - When `{run_dir}/breaking-notes.md` is present, treat its contents as the authoritative seed — the user authored those notes when approving the breaking design at gateB.
 5. **`CLAUDE.md` in the target repo**:
    - If `{target_repo_path}/CLAUDE.md` **does not exist**, do nothing. Do not create one — the user may not use Claude Code on this repo; if they want it, they can run `/init` themselves.
    - If it **already exists**, leave its existing content alone but append any new conventions this change introduces (e.g., if a new public module was added and has non-obvious usage, add a brief pointer). Do not restructure.
