@@ -43,7 +43,7 @@ A Python file with **only typed stubs** for the public API.
 
 - Full signatures with type hints that pass `mypy --strict`.
 - Bodies are `...` — no logic.
-- Google-style docstrings with Args/Returns/Raises. Raises must match the design's error model.
+- Docstrings per python-library-conventions §6 (Google style with Args/Returns/Raises). Raises must match the design's error model.
 - Importable shape consistent with the intended package layout; use module-level comments if multiple public modules are designed.
 
 Example:

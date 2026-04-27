@@ -511,6 +511,21 @@ def stage_preflight(run_dir: Path, state: dict[str, Any]) -> bool:
     return True
 
 
+# Stages whose prompt promises *more than one* required output but where
+# STAGE_OUTPUT_MARKERS only tracks one (the completion marker). Without this,
+# a crash between writing the marker and writing an auxiliary output leaves
+# the marker on disk and the next `--resume` trusts it, skipping the stage —
+# downstream stages then read the missing aux file and fail opaquely.
+# Keys match the prompt-name convention used by `stage_headless_with_gate`'s
+# `stage` argument (e.g. "s2_design", not the short "s2"). Paths are relative
+# to `run_dir` to match `STAGE_OUTPUT_MARKERS`.
+STAGE_REQUIRED_AUX_OUTPUTS: dict[str, list[str]] = {
+    # s2_design promises both design.md (the marker) and api_stubs.py.
+    # api_stubs.py is consumed by s3_tests, s4_implement, s5_review, s7_docs.
+    "s2_design": ["s2/api_stubs.py"],
+}
+
+
 def stage_headless_with_gate(
     run_dir: Path, state: dict[str, Any], stage: str, gate: str | None,
     next_stage_on_approve: str, output_marker: Path, title: str,
@@ -525,6 +540,25 @@ def stage_headless_with_gate(
         if rc != 0:
             print(f"[run.py] headless stage {stage} failed rc={rc}", file=sys.stderr)
             sys.exit(rc)
+        # Validate auxiliary outputs the prompt promises but the marker doesn't
+        # cover. If any are missing, drop the marker so the next resume re-runs
+        # the stage rather than trusting a partial output set.
+        missing_aux = [
+            aux for aux in STAGE_REQUIRED_AUX_OUTPUTS.get(stage, [])
+            if not (run_dir / aux).exists()
+        ]
+        if missing_aux:
+            if output_marker.exists():
+                output_marker.unlink()
+            joined = ", ".join(missing_aux)
+            print(
+                f"error: stage {stage} wrote completion marker "
+                f"{output_marker.relative_to(run_dir)} but required auxiliary "
+                f"output(s) missing: {joined}.\n"
+                f"  Marker removed so the next run re-executes this stage.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         state["counters"]["total_stages"] += 1
         # Register the stage output for harness-builder mode A schema (resume
         # may trust this map and skip re-running).
@@ -723,8 +757,53 @@ def stage_s5_review(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
     state["stage_outputs"]["s5_review"] = str(verdict_path.relative_to(run_dir))
 
 
+VALID_VERDICT_LABELS = {"PASS", "MINOR", "MAJOR", "CRITICAL"}
+
+
 def load_verdict(run_dir: Path) -> dict[str, Any]:
-    return yaml.safe_load((run_dir / "s5" / "verdict.yaml").read_text())
+    """Load and shape-check `s5/verdict.yaml`.
+
+    s6 reads required fields directly (`verdict["verdict"]`, `verdict["loop_target"]`,
+    `verdict.get("issues", [])`); a malformed file would otherwise surface as a
+    confusing KeyError/TypeError mid-routing. Fail-fast here turns it into a
+    clear escalation cause: re-run s5_review or fix the verdict by hand.
+    """
+    path = run_dir / "s5" / "verdict.yaml"
+    raw = path.read_text()
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as e:
+        print(f"error: {path} is not valid YAML: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(data, dict):
+        print(
+            f"error: {path} must be a YAML mapping at the top level, got "
+            f"{type(data).__name__}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    missing = [k for k in ("verdict", "issues", "loop_target") if k not in data]
+    if missing:
+        print(
+            f"error: {path} missing required field(s): {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if data["verdict"] not in VALID_VERDICT_LABELS:
+        print(
+            f"error: {path} has verdict={data['verdict']!r}, expected one of "
+            f"{sorted(VALID_VERDICT_LABELS)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not isinstance(data["issues"], list):
+        print(
+            f"error: {path} field 'issues' must be a list, got "
+            f"{type(data['issues']).__name__}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return data
 
 
 def issues_key(verdict: dict[str, Any]) -> list[str]:

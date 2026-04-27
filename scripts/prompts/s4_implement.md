@@ -61,7 +61,7 @@ git -C {target_repo_path} diff $(git -C {target_repo_path} merge-base HEAD main 
 - **Do not modify `api_stubs.py`**. If the stubs are wrong, stop and flag it — looping back to s2 is handled by the harness, not by you.
 - Code must be type-correct. `mypy --strict` is not negotiable.
 - Prefer standard library. Justify every new dependency.
-- Google-style docstrings on public APIs (copy from `api_stubs.py`, expand where implementation reveals detail).
+- Docstrings on public APIs per python-library-conventions §6 — copy from `api_stubs.py`, expand where implementation reveals detail.
 
 ## Done
 

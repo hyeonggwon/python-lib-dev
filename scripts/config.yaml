@@ -20,13 +20,7 @@ stagnation:
 review:
   sub_agents: []           # future: ["api-critic", "test-skeptic", "doc-reviewer"]
 
-fixed_tooling:
-  package_manager: uv
-  build_backend: hatchling
-  test_framework: pytest
-  linter: ruff
-  type_checker: mypy_strict
-  python_min_default: "3.10"
-  docstring_style: google
-  ci_matrix: ["3.10", "3.11", "3.12", "3.13"]
-  commit_style: conventional
+# Fixed tooling (uv / hatchling / pytest / mypy --strict / ruff / Google docstrings /
+# Python 3.10 floor / Conventional Commits / 3.10-3.13 CI matrix) is the single-
+# source-of-truth in `.claude/skills/python-library-conventions/SKILL.md`.
+# It is intentionally NOT mirrored here — duplicating it would invite drift.

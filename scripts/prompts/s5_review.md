@@ -48,7 +48,7 @@ Sections:
 - **API fidelity**: does the implementation match `api_stubs.py` signatures and contracts exactly?
 - **Test quality**: coverage is a number (already in gates); quality is not. Are tests behavioral, non-trivial, parameterized where appropriate?
 - **Correctness risks**: boundary conditions, error paths, concurrency if applicable.
-- **Documentation**: Google-style docstrings on public symbols, accurate, complete? (README/CHANGELOG is evaluated in s7 — skip here.)
+- **Documentation**: docstrings on public symbols (style per python-library-conventions §6) — accurate, complete? (README/CHANGELOG is evaluated in s7 — skip here.)
 - **(evolve) Backward compatibility**: any public API broken that `plan.md` did not declare breaking? Any existing test now failing per `gates/tests.json`?
 - **Positive notes**: what was done well. Brief.
 

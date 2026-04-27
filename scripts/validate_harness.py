@@ -7,6 +7,8 @@ The harness has several coupled surfaces that must stay in sync:
   * scripts/prompts/<stage>.md  ↔  placeholder substitution map in run.py
   * Gate rewrite feedback paths ↔  each prompt's Inputs section
   * s5_review.md verdict schema ↔  fields run.py actually consumes
+  * s5_review.md verdict labels ↔  VALID_VERDICT_LABELS in run.py
+  * STAGE_REQUIRED_AUX_OUTPUTS  ↔  the stage prompt's Outputs section
   * escalation request fields    ↔  handle_escalation_decision consumers
   * README install commands      ↔  flags modern uv/pip actually require
 
@@ -44,11 +46,21 @@ STAGES_WITH_FEEDBACK = {"s0_survey", "s1_plan", "s2_design", "s4_implement"}
 SHELL_BUILTINS = {"cd", "true", "false", "echo", "exit", "pwd", "set"}
 
 
-def parse_run_py() -> tuple[dict[str, list[str]], set[str]]:
-    """Pull STAGE_TOOLS and the .replace("{X}", ...) keys out of run.py."""
+def parse_run_py() -> tuple[dict[str, list[str]], set[str], dict[str, list[str]], set[str]]:
+    """Pull structured constants out of run.py.
+
+    Returns:
+        stage_tools: STAGE_TOOLS dict (stage → list of allowlist entries).
+        sub_keys: placeholder names used in the .replace("{X}", ...) chain.
+        aux_outputs: STAGE_REQUIRED_AUX_OUTPUTS dict (stage → list of run-relative
+            paths the orchestrator demands in addition to the completion marker).
+        verdict_labels: VALID_VERDICT_LABELS set literal (e.g. {"PASS", "MINOR", ...}).
+    """
     text = RUN_PY.read_text()
 
     stage_tools: dict[str, list[str]] = {}
+    aux_outputs: dict[str, list[str]] = {}
+    verdict_labels: set[str] = set()
     tree = ast.parse(text)
     for node in ast.walk(tree):
         target: ast.expr | None = None
@@ -56,19 +68,32 @@ def parse_run_py() -> tuple[dict[str, list[str]], set[str]]:
             target = node.targets[0]
         elif isinstance(node, ast.AnnAssign):
             target = node.target
-        if not (isinstance(target, ast.Name) and target.id == "STAGE_TOOLS"):
+        if not isinstance(target, ast.Name):
             continue
-        if not isinstance(node.value, ast.Dict):
-            continue
-        for k, v in zip(node.value.keys, node.value.values):
-            if isinstance(k, ast.Constant) and isinstance(v, ast.Constant):
-                stage_tools[k.value] = [p.strip() for p in v.value.split(",") if p.strip()]
+        name = target.id
+        value = node.value
+        if name == "STAGE_TOOLS" and isinstance(value, ast.Dict):
+            for k, v in zip(value.keys, value.values):
+                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant):
+                    stage_tools[k.value] = [p.strip() for p in v.value.split(",") if p.strip()]
+        elif name == "STAGE_REQUIRED_AUX_OUTPUTS" and isinstance(value, ast.Dict):
+            for k, v in zip(value.keys, value.values):
+                if isinstance(k, ast.Constant) and isinstance(v, ast.List):
+                    items: list[str] = []
+                    for elt in v.elts:
+                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                            items.append(elt.value)
+                    aux_outputs[k.value] = items
+        elif name == "VALID_VERDICT_LABELS" and isinstance(value, ast.Set):
+            for elt in value.elts:
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                    verdict_labels.add(elt.value)
 
     # The substitution chain in call_headless is the only place run.py uses
     # .replace("{X}", ...) so a regex sweep is sufficient and avoids encoding
     # call_headless's exact AST shape here.
     sub_keys = set(re.findall(r'\.replace\("\{([A-Za-z_][A-Za-z0-9_]*)\}"', text))
-    return stage_tools, sub_keys
+    return stage_tools, sub_keys, aux_outputs, verdict_labels
 
 
 def allowlist_patterns(entries: list[str]) -> list[str]:
@@ -177,6 +202,92 @@ def check_verdict_schema_consumed() -> list[str]:
     return issues
 
 
+def check_verdict_labels_consistent(verdict_labels: set[str]) -> list[str]:
+    """`VALID_VERDICT_LABELS` in run.py must equal the enum in s5_review.md.
+
+    The schema's `verdict:` line carries the labels in an inline comment:
+        verdict: PASS            # PASS | MINOR | MAJOR | CRITICAL
+    Drift here is silent and asymmetric: a label only in the prompt is
+    rejected at runtime by load_verdict's enum check (the LLM sees no error
+    until s6 escalates); a label only in run.py would never be emitted, so
+    the loop logic for it would be dead code.
+    """
+    if not S5_REVIEW.exists():
+        return [f"[verdict-labels] {S5_REVIEW.name} missing"]
+    if not verdict_labels:
+        return [
+            "[verdict-labels] could not locate `VALID_VERDICT_LABELS = {...}` set "
+            "literal in run.py (parse_run_py only matches a top-level set assignment)"
+        ]
+    text = S5_REVIEW.read_text()
+    m = re.search(r"```yaml\s*\n(.*?)```", text, re.DOTALL)
+    if not m:
+        return [f"[verdict-labels] {S5_REVIEW.name} has no ```yaml fenced schema block"]
+    schema_block = m.group(1)
+    label_line = next(
+        (ln for ln in schema_block.splitlines() if ln.lstrip().startswith("verdict:")),
+        None,
+    )
+    if label_line is None:
+        return [f"[verdict-labels] {S5_REVIEW.name} schema block has no `verdict:` field"]
+    comment_match = re.search(r"#\s*([A-Z_][A-Z_| ]+)", label_line)
+    if not comment_match:
+        return [
+            f"[verdict-labels] {S5_REVIEW.name} `verdict:` line has no inline `# A | B | C` "
+            "enum comment — cannot extract the prompt's enum to compare"
+        ]
+    prompt_labels = {tok.strip() for tok in comment_match.group(1).split("|") if tok.strip()}
+    issues: list[str] = []
+    only_prompt = prompt_labels - verdict_labels
+    only_runpy = verdict_labels - prompt_labels
+    if only_prompt:
+        issues.append(
+            f"[verdict-labels] s5_review.md schema enum has {sorted(only_prompt)} but "
+            f"run.py VALID_VERDICT_LABELS does not — load_verdict() would reject those "
+            f"verdicts the LLM is told it may emit"
+        )
+    if only_runpy:
+        issues.append(
+            f"[verdict-labels] run.py VALID_VERDICT_LABELS has {sorted(only_runpy)} but "
+            f"the s5_review.md schema enum does not — those run.py branches are unreachable"
+        )
+    return issues
+
+
+def check_aux_outputs_referenced(aux_outputs: dict[str, list[str]]) -> list[str]:
+    """Every `STAGE_REQUIRED_AUX_OUTPUTS[stage]` path must appear in that prompt.
+
+    run.py treats a missing aux output as "stage cheated the marker" and
+    aborts. If a future prompt edit drops the requirement, every run will
+    fail here with no hint that the prompt itself is the cause. The simplest
+    structural guard is to require the path string to appear *somewhere* in
+    the prompt body.
+    """
+    issues: list[str] = []
+    for stage, paths in aux_outputs.items():
+        prompt_path = PROMPTS_DIR / f"{stage}.md"
+        if not prompt_path.exists():
+            issues.append(
+                f"[aux-output] STAGE_REQUIRED_AUX_OUTPUTS has {stage!r} but "
+                f"scripts/prompts/{stage}.md is missing"
+            )
+            continue
+        text = prompt_path.read_text()
+        for path in paths:
+            # Match the path's basename or full run-relative form. Prompts
+            # typically write `{run_dir}/s2/api_stubs.py` so the basename
+            # `api_stubs.py` is the most reliable anchor.
+            basename = path.rsplit("/", 1)[-1]
+            if path not in text and basename not in text:
+                issues.append(
+                    f"[aux-output] {prompt_path.name}: STAGE_REQUIRED_AUX_OUTPUTS "
+                    f"demands {path!r} but the prompt never mentions it. The "
+                    "stage will write its completion marker, run.py will then "
+                    "abort the run with 'required auxiliary output(s) missing'."
+                )
+    return issues
+
+
 def check_escalation_fields_consumed() -> list[str]:
     run_text = RUN_PY.read_text()
     # Find write_escalation_request / equivalent template in run.py — the
@@ -254,7 +365,7 @@ def main() -> int:
         print(f"error: {PROMPTS_DIR} not found", file=sys.stderr)
         return 2
 
-    stage_tools, sub_keys = parse_run_py()
+    stage_tools, sub_keys, aux_outputs, verdict_labels = parse_run_py()
     issues: list[str] = []
     used_placeholders: set[str] = set()
     prompt_stems: set[str] = set()
@@ -337,6 +448,19 @@ def main() -> int:
     # the orchestrator silently ignores — a class of drift this harness has
     # already been bitten by (loop_target was unenforced for ages).
     issues.extend(check_verdict_schema_consumed())
+
+    # 5b. s5_review.md verdict label enum ↔ VALID_VERDICT_LABELS in run.py.
+    # load_verdict() rejects any label not in the run.py set, so a prompt-only
+    # label is a silent contract break (the LLM is told it may emit it; the
+    # orchestrator escalates). A run.py-only label is dead code.
+    issues.extend(check_verdict_labels_consistent(verdict_labels))
+
+    # 5c. STAGE_REQUIRED_AUX_OUTPUTS ↔ stage prompt body.
+    # stage_headless_with_gate aborts the run if a registered aux output is
+    # missing after the marker is written. A prompt edit that drops the
+    # auxiliary file requirement would surface as repeated mid-run aborts
+    # with no obvious cause; require the path to appear in the prompt.
+    issues.extend(check_aux_outputs_referenced(aux_outputs))
 
     # 6. escalation request template ↔ handle_escalation_decision consumers.
     # The escalation.md template invites the user to write `feedback: |` etc.

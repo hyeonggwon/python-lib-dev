@@ -79,7 +79,7 @@ The orchestrator uses this file's presence to decide whether s7 needs to re-run 
 
 ## Style
 
-- Google-style docstrings in source code are kept in sync with the design's error model. If `api.md` and the docstrings drift, fix the source docstrings in a small commit — s5 already approved substantive content, so docstring edits should be wording only.
+- Source-code docstrings (style per python-library-conventions §6) are kept in sync with the design's error model. If `api.md` and the docstrings drift, fix the source docstrings in a small commit — s5 already approved substantive content, so docstring edits should be wording only.
 - README structure: tagline → install → 10-line usage example → link to docs. Avoid feature enumerations.
 - Code snippets in docs: each snippet must be independently runnable (imports included). Trivial output-only examples may be elided.
 - Link to the specific version of Python supported (read `python_min` from `{run_dir}/interview/mode.json`).
