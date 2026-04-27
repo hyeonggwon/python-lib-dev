@@ -27,7 +27,7 @@ Claude Code 세션</br>
 
 1. **Interview** — 메인 세션이 `deep-interview-python-lib`로 사용자와 대화해 `spec.md` + `mode.json` 확정.
 2. **Init** — `scripts/init_run.py`가 `outputs/<run-id>/` 생성.
-3. **Orchestrate** — `scripts/run.py --run-id <id>`가 각 단계(s0..s8)를 headless로 호출.
+3. **Orchestrate** — `scripts/run.py --run-id <id>`가 s0..s8 을 진행 — 작업 stage 는 headless, s6 판정 / s8 delivery 는 오케스트레이터.
 4. **Gates** — 블로킹 게이트(evolve의 survey, plan, design) 도달 시 `<gate>.request.md` 남기고 정지. 사용자와 함께 decision 작성 후 같은 명령으로 재개.
 5. **Loop** — s5 리뷰 verdict에 따라 MINOR → s4, MAJOR → s2로 자동 루프백. CRITICAL / cap 초과 / 정체 시 `escalation.md` 생성 후 정지.
 6. **Deliver** — 모든 단계 통과 시 `delivery.md` 생성 후 종료.
@@ -46,7 +46,7 @@ python-lib-dev/
     gates.py                  # 기계 게이트 실행 (pytest / mypy / ruff / coverage)
     validate_harness.py       # 프롬프트 ↔ STAGE_TOOLS / 치환 / feedback 경로 drift 검사
     config.yaml               # 캡, 임계치, 정체 감지 파라미터
-    prompts/                  # s0..s7 프롬프트 정본
+    prompts/                  # headless stage 프롬프트 (s0..s5, s7)
   .claude/skills/             # project-local skill (CWD 가 이 레포 안일 때만 로드)
     orchestrate-python-lib/
     deep-interview-python-lib/
@@ -91,7 +91,7 @@ workspace/                    # new 모드 산출물 (실제 라이브러리 본
 - 루트에 `pyproject.toml` / `src/` / `tests/`를 만들지 말 것 — 이 레포는 라이브러리가 아님.
 - `outputs/`는 커밋 금지.
 
-무엇을 어디서 고치는지 매핑 표는 `CLAUDE.md` §5.
+무엇을 어디서 고치는지 매핑 표는 `CLAUDE.md` §4.
 
 ## Requirements
 

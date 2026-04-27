@@ -29,7 +29,7 @@ In a Claude Code session</br>
 
 1. **Interview** — The main session uses `deep-interview-python-lib` to talk with the user and finalize `spec.md` + `mode.json`.
 2. **Init** — `scripts/init_run.py` creates `outputs/<run-id>/`.
-3. **Orchestrate** — `scripts/run.py --run-id <id>` calls each stage (s0..s8) headlessly.
+3. **Orchestrate** — `scripts/run.py --run-id <id>` runs s0..s8 — work stages headless, s6 verdict / s8 delivery in-orchestrator.
 4. **Gates** — When a blocking gate (evolve's survey, plan, design) is hit, it writes `<gate>.request.md` and stops. After writing the decision with the user, resume with the same command.
 5. **Loop** — Based on the s5 review verdict, MINOR → loop back to s4, MAJOR → loop back to s2 automatically. On CRITICAL / cap exceeded / stall, it writes `escalation.md` and stops.
 6. **Deliver** — Once all stages pass, it generates `delivery.md` and exits.
@@ -48,7 +48,7 @@ python-lib-dev/
     gates.py                  # mechanical gates (pytest / mypy / ruff / coverage)
     validate_harness.py       # drift checks: prompts ↔ STAGE_TOOLS / placeholders / feedback paths
     config.yaml               # caps, thresholds, stall detection params
-    prompts/                  # source prompts for s0..s7
+    prompts/                  # headless stage prompts (s0..s5, s7)
   .claude/skills/             # project-local skills (load only when CWD is inside this repo)
     orchestrate-python-lib/
     deep-interview-python-lib/
@@ -93,7 +93,7 @@ When modifying this repo, **read `CLAUDE.md` first.** Summary:
 - Do not create `pyproject.toml` / `src/` / `tests/` at the root — this repo is not a library.
 - Do not commit `outputs/`.
 
-See `CLAUDE.md` §5 for the mapping of what-to-edit-where.
+See `CLAUDE.md` §4 for the mapping of what-to-edit-where.
 
 ## Requirements
 
