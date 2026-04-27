@@ -26,14 +26,16 @@ def check_tool(name: str, install_hint: str = "") -> list[str]:
     return []
 
 
-def check_target(path_str: str) -> list[str]:
+def check_target(path_str: str) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings). Errors abort preflight; warnings are stderr-only."""
     errors: list[str] = []
+    warnings: list[str] = []
     p = Path(path_str).expanduser().resolve()
 
     if not p.is_dir():
-        return [f"target_repo_path not a directory: {p}"]
+        return [f"target_repo_path not a directory: {p}"], []
     if not (p / ".git").exists():
-        return [f"target_repo_path is not a git repo: {p}"]
+        return [f"target_repo_path is not a git repo: {p}"], []
 
     status = subprocess.run(
         ["git", "-C", str(p), "status", "--porcelain"],
@@ -69,14 +71,15 @@ def check_target(path_str: str) -> list[str]:
             )
         elif "[tool.poetry]" in text and "[project]" not in text:
             # Poetry-only projects sometimes work with uv, sometimes don't —
-            # warn rather than hard-fail so the user isn't blocked needlessly.
-            errors.append(
+            # warn (not error) so the user isn't blocked. If `uv run pytest`
+            # later fails inside gates.py, the output_tail will explain why.
+            warnings.append(
                 f"target_repo_path appears to be poetry-only (no [project] table): {p}\n"
                 "    uv may not handle this cleanly. If `uv run pytest` fails later,\n"
                 "    migrate to a PEP 621 [project] table or use a different harness."
             )
 
-    return errors
+    return errors, warnings
 
 
 def main() -> int:
@@ -86,6 +89,7 @@ def main() -> int:
     args = ap.parse_args()
 
     errors: list[str] = []
+    warnings: list[str] = []
     errors += check_tool("uv", UV_INSTALL_HINT)
     errors += check_tool("git")
     errors += check_tool("claude", CLAUDE_HINT)
@@ -94,7 +98,14 @@ def main() -> int:
         if not args.target_repo_path:
             errors.append("evolve mode requires --target-repo-path")
         else:
-            errors += check_target(args.target_repo_path)
+            target_errors, target_warnings = check_target(args.target_repo_path)
+            errors += target_errors
+            warnings += target_warnings
+
+    if warnings:
+        print("preflight warnings:", file=sys.stderr)
+        for w in warnings:
+            print(f"  - {w}", file=sys.stderr)
 
     if errors:
         print("preflight failed:", file=sys.stderr)

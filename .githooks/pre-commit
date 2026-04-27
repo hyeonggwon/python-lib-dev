@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pre-commit — block commits that introduce harness drift.
+#
+# This hook is tracked in the repo (unlike .git/hooks/, which is local-only).
+# Activate per-clone with:
+#     git config core.hooksPath .githooks
+#
+# install.sh wires this up automatically.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+exec python3 scripts/validate_harness.py

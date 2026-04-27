@@ -13,10 +13,10 @@ Mechanical verification (tests, mypy, ruff, coverage) has **already been run by 
 5. `{run_dir}/s2/api_stubs.py`
 6. Tests:
    - **new**: `{run_dir}/workspace/tests/`
-   - **evolve**: `{target_repo_path}/tests/` (HEAD on branch `harness/{run_id}`)
+   - **evolve**: `{target_repo_path}/tests/` (HEAD on branch `{branch_name}`)
 7. Source:
    - **new**: `{run_dir}/workspace/src/{lib_name}/`
-   - **evolve**: `{target_repo_path}` source (HEAD on branch `harness/{run_id}`); also inspect `{run_dir}/s4/changes.patch`
+   - **evolve**: `{target_repo_path}` source (HEAD on branch `{branch_name}`); also inspect `{run_dir}/s4/changes.patch`
 8. **Mechanical gate results (authoritative)**:
    - `{run_dir}/gates/summary.json` — overall pass/fail map + coverage numbers
    - `{run_dir}/gates/tests.json`, `mypy.json`, `ruff_check.json`, `ruff_format.json`, `coverage.json` — individual gate output tails for your reading

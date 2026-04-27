@@ -10,9 +10,10 @@ Build a high-fidelity map of the existing library so downstream stages (plan, de
 
 1. `{run_dir}/interview/spec.md` — user's change request
 2. `{run_dir}/interview/mode.json` — run parameters (look up `target_repo_path`)
-3. `{HARNESS_ROOT}/docs/task-spec.md`
-4. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
-5. The target repository at `{target_repo_path}`
+3. (if a previous gate0 rewrite happened) `{run_dir}/s0_survey/feedback.md` — what the user wants you to redo or expand on
+4. `{HARNESS_ROOT}/docs/task-spec.md`
+5. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
+6. The target repository at `{target_repo_path}`
 
 ## Output
 

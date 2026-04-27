@@ -74,7 +74,7 @@ def parse(source: str, *, strict: bool = False) -> dict[str, object]:
 ## Rules
 
 - Do **not** write implementations. If a body contains real logic, it belongs in s4.
-- The stubs file must type-check under `mypy --strict`. Run `uv run mypy --strict {run_dir}/s2/api_stubs.py` if possible; if the environment does not allow it, record a `Verification TODO` note in `design.md`.
+- The stubs file must type-check under `mypy --strict`. **You cannot run mypy in this stage** (s2 has no shell access by design — mypy / pytest / ruff run only at gates time, after s4). Write the stubs so they would compile cleanly: explicit type hints on every parameter and return, no implicit `Any`, no missing `from __future__ import annotations`. If you are uncertain about a typing edge case, record a `Verification TODO` note in `design.md` for s4 to confirm.
 - Design for the failure modes listed in `s1/plan.md` Risks; don't paper over them.
 - In evolve mode, treat `{run_dir}/s0/survey.md` as authoritative about current state; disagreements must be flagged in `design.md`, not silently corrected.
 

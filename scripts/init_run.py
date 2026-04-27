@@ -37,12 +37,21 @@ def main() -> int:
         return 1
 
     (run_dir / "interview").mkdir(parents=True)
+    # Schema follows harness-builder § 단계 4 모드 A 정식 스키마:
+    # `status`/`current_stage`/`awaiting_input_schema`/`user_input`/`stage_outputs`
+    # are baseline; `counters`/`overrides` are domain-specific per the spec.
+    # Domain extensions: mode/target_repo_path/lib_name/etc., verdict_history (0-4),
+    # gate_decisions (per-gate state), preflight_done, branch_name, last_escalation_trigger.
     state = {
         "run_id": run_id,
         "harness": "python-lib-dev",
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
-        "mode": None,
+        "status": "running",
         "current_stage": "di",
+        "awaiting_input_schema": None,
+        "user_input": {},
+        "stage_outputs": {},
+        "mode": None,
         "target_repo_path": None,
         "lib_name": None,
         "pypi_slug": None,

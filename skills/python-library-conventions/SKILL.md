@@ -71,7 +71,7 @@ uv run ruff format --check .
 
 ## 7. evolve 모드 추가 규칙
 
-- 시작 시 `{target_repo_path}` 에서 `git checkout -b harness/{run_id}`.
+- 시작 시 `{target_repo_path}` 에서 `git checkout -b <branch_name>` (인터뷰에서 확정된 `mode.json.branch_name`, 기본값 `harness/<run-id>`). 이 작업은 `run.py` 의 preflight 가 수행하므로 헤드리스가 직접 만들지 않음.
 - `main`/`master` 자동 머지 금지.
 - 기존 공개 API는 **breaking change 승인(게이트 B)** 없이 바꾸지 않음.
 - 기존 테스트는 **모두** 통과해야 함.

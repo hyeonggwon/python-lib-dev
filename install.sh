@@ -42,6 +42,14 @@ for d in "$HARNESS_ROOT/skills/"*/; do
     echo "  linked: ~/.claude/skills/$name -> $d"
 done
 
+# Activate the tracked pre-commit hook for this clone (idempotent).
+# .git/hooks/ is local-only and not pushed; .githooks/ is tracked, and
+# core.hooksPath points git at it so every clone gets the same drift checks.
+if [[ -d "$HARNESS_ROOT/.git" ]]; then
+    git -C "$HARNESS_ROOT" config core.hooksPath .githooks
+    echo "  hooks: core.hooksPath = .githooks (validate_harness.py runs on commit)"
+fi
+
 echo ""
 echo "install complete."
 echo "Main sessions resolve HARNESS_ROOT at runtime from the symlink target."

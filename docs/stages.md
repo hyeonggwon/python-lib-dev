@@ -1,5 +1,16 @@
 # python-lib-dev — Stages
 
+## Orchestration 모드 — A (선형/단순)
+
+근거 (harness-builder 단계 4 체크리스트):
+
+1. **조건부 분기**: `s6` 의 verdict 분기(PASS/MINOR/MAJOR/CRITICAL/cap) 하나뿐 — 단일 분기점은 모드 B 신호 아님.
+2. **병렬 단계**: 없음.
+3. **동적 단계 수**: 새/evolve 모드에 따라 `s0` 유무 차이 외에는 정적.
+4. **루프백**: `s6 → s4` (MINOR), `s6 → s2` (MAJOR) 가 있으나, 0-4 의 verdict 루프백은 단일 stage 내부 재시도이므로 모드 B 신호 아님.
+
+따라서 단일 python script (`scripts/run.py`)가 전체 파이프라인을 조율한다.
+
 전체 파이프라인은 `pre` → `di` → (`s0`) → `s1` → `s2` → `s3` → `s4` → `s5` → `s6` → (루프백 or 진행) → `s7` → `s8` 순서.
 `s0`는 evolve 모드 전용. `s6`의 판정에 따라 `s2`/`s4`로 자동 루프백하거나 에스컬레이션 게이트를 연다.
 
@@ -69,7 +80,7 @@
 
 - `gate_decisions[gateX]`: `null` = pending, `"approved"` = 통과, `"rewrite"` = 재작업(해당 단계 재실행), `"approved_with_breaking"` = 게이트 B evolve 전용.
 - `verdict_history`는 s5 종료 시마다 append. 정체 감지에 사용.
-- `branch_name`은 evolve 모드에서 interview가 확정한 브랜치명을 저장. 기본값은 `harness/<run-id>` 이며 사용자가 override 가능. new 모드는 `null`.
+- `branch_name`은 evolve 모드에서 interview가 확정한 브랜치명을 저장. 사용자가 커스텀 이름(`feat/...` 등) 을 주면 그 문자열을 저장. **기본값(`harness/<run-id>`) 으로 OK 하면 `null`** — `run.py` preflight 가 `f"harness/{run_id}"` 로 채운다. new 모드는 `null`.
 
 ---
 
@@ -183,6 +194,13 @@ script는 이 파일 생성 후 종료 코드 2로 정지.
 ```
 
 `action: resume_from_plan` 은 실질적 "기획 루프백"이며, 사용자 결정 없이 자동 발동되지 않는다.
+
+### 트리거별 권장 액션
+
+- `cap_minor_loop` / `cap_major_loop`: `force_continue` 로 해당 카운터 리셋. 같은 패턴이 또 안 풀리면 `resume_from_design` 으로 격상.
+- `cap_total_stages`: `force_continue` 로 `total_stages` 리셋 가능하나, 이 cap 까지 왔다는 건 진행이 막혔다는 뜻. 대개 `resume_from_plan` / `resume_from_design` 가 맞음.
+- `stagnation`: **`force_continue` 비추천**. 정체는 verdict_history 의 다수 항목 overlap 으로 감지되므로 한 번 pop 한다고 풀리지 않고 다음 s6 에서 곧장 재escalate 된다. `resume_from_design` 또는 `resume_from_plan` 로 새로운 출발점에서 verdict_history 를 비우는 것이 정답.
+- `critical_verdict` / `llm_pass_despite_failing_gates`: `force_continue` 부적절. `resume_from_design` 또는 `abort`.
 
 ---
 

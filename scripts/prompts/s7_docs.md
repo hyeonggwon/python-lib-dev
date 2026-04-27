@@ -15,7 +15,7 @@ Produce user-facing documentation consistent with the delivered code. No marketi
 5. `{run_dir}/s2/api_stubs.py`
 6. Source:
    - **new**: `{run_dir}/workspace/src/{lib_name}/`
-   - **evolve**: `{target_repo_path}` source (HEAD on branch `harness/{run_id}`)
+   - **evolve**: `{target_repo_path}` source (HEAD on branch `{branch_name}`)
 7. `{run_dir}/s5/review.md` — anything the reviewer flagged about docs
 8. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
 
@@ -51,11 +51,20 @@ Do **not** generate `CLAUDE.md` for the delivered library. The user may or may n
    - If `{target_repo_path}/CLAUDE.md` **does not exist**, do nothing. Do not create one — the user may not use Claude Code on this repo; if they want it, they can run `/init` themselves.
    - If it **already exists**, leave its existing content alone but append any new conventions this change introduces (e.g., if a new public module was added and has non-obvious usage, add a brief pointer). Do not restructure.
 
-Record the evolve diff:
+Record the evolve diff (before committing — so the patch reflects the doc-only delta):
 
 ```bash
 git -C {target_repo_path} diff HEAD -- '*.md' docs > {run_dir}/s7/docs-diff.patch
 ```
+
+Then **commit the doc changes onto the harness branch** so the user gets a clean branch (no uncommitted tree blocking their PR). Stage only the doc-relevant paths to avoid accidentally including unrelated working-tree files:
+
+```bash
+git -C {target_repo_path} add '*.md' docs
+git -C {target_repo_path} commit -m "docs: update for harness run {run_id}"
+```
+
+If `git status` shows nothing staged after `git add` (e.g. only docstring whitespace edits in source already committed by s4), skip the commit and note "no doc-only changes to commit" in `impl-notes.md`.
 
 ## Completion signal (both modes)
 

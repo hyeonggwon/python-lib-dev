@@ -13,7 +13,7 @@ Make the failing tests pass with minimal, clean implementation that honors the d
 3. `{run_dir}/s2/design.md`
 4. `{run_dir}/s2/api_stubs.py`
 5. **new mode**: tests in `{run_dir}/workspace/tests/`
-6. **evolve mode**: existing repo at `{target_repo_path}` (already on branch `harness/{run_id}`) + staged new tests in `{run_dir}/s3/tests-new/`
+6. **evolve mode**: existing repo at `{target_repo_path}` (already on branch `{branch_name}`) + staged new tests in `{run_dir}/s3/tests-new/`
 7. (if looping back from MINOR) `{run_dir}/s4_implement/feedback.md` — prior s5 review + verdict, preserved by the orchestrator before s5 was cleared. Fix the listed issues.
 8. `{HARNESS_ROOT}/docs/task-spec.md`
 9. `{HARNESS_ROOT}/docs/tacit-knowledge.md`
@@ -24,7 +24,7 @@ Make the failing tests pass with minimal, clean implementation that honors the d
 - **evolve mode**:
   1. Copy/integrate tests from `{run_dir}/s3/tests-new/` into `{target_repo_path}/tests/`. Resolve conflicts per the manifest; if a conflict was flagged for user decision and no direction was given, stop and raise it.
   2. Modify `{target_repo_path}` source to make new tests pass while keeping existing tests green.
-  3. Commit in logical steps on branch `harness/{run_id}` (Conventional Commits). No squashing.
+  3. Commit in logical steps on branch `{branch_name}` (Conventional Commits). No squashing.
 
 ## Required loop
 

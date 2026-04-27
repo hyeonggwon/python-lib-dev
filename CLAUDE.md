@@ -57,6 +57,8 @@
 | 기계 게이트 실행 (pytest/mypy/ruff/coverage) | `scripts/gates.py` (Amendment A7, 0-2 clean separation) |
 | Stage별 헤드리스 도구 권한 | `scripts/run.py` 상단 `STAGE_TOOLS` 맵 (0-3) |
 | Run 간 증거 축적 (`.index.jsonl`, 에스컬레이션 과거 맥락) | `scripts/run.py` `append_index_entry` / `format_cross_run_pattern_block` (0-5) |
+| Drift 검사 (프롬프트 ↔ STAGE_TOOLS / 치환 맵 / feedback 경로) | `scripts/validate_harness.py` |
+| Pre-commit 강제 (위 검사를 커밋 전에 실행) | `.githooks/pre-commit` (트래킹됨; `install.sh` 가 `core.hooksPath` 자동 설정) |
 
 **두 곳 동기화** 항목: skill과 docs가 중복 기재되는 이유는 skill이 사용자 지시용, docs가 참조 저장소용이기 때문. 한쪽만 고치면 drift가 난다.
 

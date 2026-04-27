@@ -40,7 +40,9 @@ HARNESS_ROOT=$(dirname $(dirname $(dirname $(realpath ~/.claude/skills/deep-inte
 4. **한 줄 목적 설명**
 5. **주요 사용 시나리오 2~3개**
 6. (evolve 전용) **이번 변경 요구**: 기능 추가 1건, 버그 수정 1건, 또는 밀접 연관 묶음. 대규모면 여러 run으로 쪼개도록 안내.
-7. (evolve 전용) **작업 브랜치명**: 반드시 물어본다. 기본값 `harness/<run-id>` 를 제시하고 사용자가 OK 하면 그대로, 커스텀 이름을 주면 그 값을 확정. mode.json에는 확정된 실제 문자열을 저장(기본값 선택이어도 `"harness/<run-id>"` 로).
+7. (evolve 전용) **작업 브랜치명**: 반드시 물어본다. 기본값 `harness/<run-id>` 를 제시하고 사용자가 OK 하면 그대로, 커스텀 이름을 주면 그 값을 확정.
+   - mode.json 저장 규칙: **기본값 선택 시 `branch_name: null`** (preflight 가 실제 run-id 로 채움). 커스텀 이름이면 그 문자열을 저장.
+   - `<run-id>` 는 placeholder 이므로 `"harness/<run-id>"` 를 literal 로 저장하지 말 것.
 
 **선택 (사용자가 먼저 언급하면만 기록):**
 
@@ -89,7 +91,7 @@ HARNESS_ROOT=$(dirname $(dirname $(dirname $(realpath ~/.claude/skills/deep-inte
 }
 ```
 
-- `branch_name`: evolve 시 interview에서 확정된 실제 브랜치명(기본값이어도 `"harness/<run-id>"` 같이 구체 문자열로). new 모드는 `null`.
+- `branch_name`: evolve 모드에서 사용자가 커스텀 이름을 줬을 때만 그 문자열. **기본값(`harness/<run-id>`) 선택 시 `null`** — preflight 가 채워준다. new 모드도 `null`.
 
 - `null` = 기본값 사용
 - `target_repo_path` 는 evolve 모드에서만 절대 경로 문자열

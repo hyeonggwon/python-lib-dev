@@ -57,6 +57,40 @@ def load_config() -> dict[str, Any]:
     return yaml.safe_load(CONFIG_PATH.read_text())
 
 
+# ---------- harness-builder mode A schema helpers ----------
+# state["status"] / awaiting_input_schema / user_input transitions.
+# These keep state.json compliant with the harness-builder § 단계 4 mode A
+# contract so a generic resume tool can read which fields the user must fill
+# without parsing gate request markdown.
+
+GATE_DECISION_SCHEMA: dict[str, str] = {
+    "decision": "approved | rewrite",
+    "feedback": "string (required if rewrite)",
+}
+GATE_DECISION_SCHEMA_EVOLVE_DESIGN: dict[str, str] = {
+    "decision": "approved | rewrite | approved_with_breaking",
+    "feedback": "string (required if rewrite)",
+    "breaking_notes": "string (required if approved_with_breaking)",
+}
+ESCALATION_DECISION_SCHEMA: dict[str, str] = {
+    "action": "abort | resume_from_plan | resume_from_design | force_continue",
+    "feedback": "string",
+    "reset_counters": "list (only with force_continue)",
+}
+
+
+def set_awaiting(state: dict[str, Any], schema: dict[str, str]) -> None:
+    state["status"] = "awaiting_user"
+    state["awaiting_input_schema"] = schema
+
+
+def clear_awaiting(state: dict[str, Any], user_input: dict[str, Any] | None = None) -> None:
+    state["status"] = "running"
+    state["awaiting_input_schema"] = None
+    if user_input is not None:
+        state["user_input"] = user_input
+
+
 # ---------- cross-run evidence (0-5) ----------
 
 def append_index_entry(state: dict[str, Any], final_status: str, escalation_trigger: str | None = None) -> None:
@@ -238,11 +272,17 @@ STAGE_TOOLS: dict[str, str] = {
     # Independent review: writes review.md/verdict.yaml. Reads gates/*.json for
     # mechanical results — does not execute them itself (0-2 clean separation).
     # No Edit (must not modify source under review), no Bash(uv run *) (gates
-    # are authoritative). Git read-only for inspecting evolve diffs.
-    "s5_review":    "Read,Grep,Glob,Write,Bash(git log *),Bash(git diff *),Bash(git show *),Bash(git status *)",
+    # are authoritative). Git read-only for inspecting diffs in BOTH the
+    # workspace cwd and `target_repo_path` (evolve mode reviews the harness
+    # branch via `git -C <target_repo_path> ...`).
+    "s5_review":    "Read,Grep,Glob,Write,Bash(git log *),Bash(git diff *),Bash(git show *),Bash(git status *),Bash(git -C * log *),Bash(git -C * diff *),Bash(git -C * show *),Bash(git -C * status *)",
     # Docs: writes documentation, may run uv to verify snippets compile.
     # Needs `git -C <target_repo_path> diff` for the evolve-mode docs-diff.patch.
-    "s7_docs":      "Read,Grep,Glob,Write,Edit,Bash(uv run *),Bash(git diff *),Bash(git -C * diff *)",
+    # In evolve mode s7 also commits the doc changes onto the harness branch so
+    # users get a complete branch (no leftover dirty tree blocking PR). Git
+    # allowlist mirrors s4's non-destructive subset: add/commit/status, both
+    # bare and `-C <path>` forms. mkdir/touch are needed for docs-done.marker.
+    "s7_docs":      "Read,Grep,Glob,Write,Edit,Bash(uv run *),Bash(git add *),Bash(git commit *),Bash(git status *),Bash(git diff *),Bash(git -C * add *),Bash(git -C * commit *),Bash(git -C * status *),Bash(git -C * diff *),Bash(mkdir *),Bash(touch *)",
 }
 
 
@@ -261,14 +301,23 @@ def call_headless(stage: str, run_dir: Path, extra: str = "") -> int:
     mode_data: dict[str, Any] = json.loads(mode_json.read_text()) if mode_json.exists() else {}
     target_repo_path = mode_data.get("target_repo_path") or ""
     lib_name = mode_data.get("lib_name") or ""
+    # branch_name is interview-confirmed (default `harness/<run-id>`, may be
+    # user-customized to `feat/...` etc.). Read from state.json (resolved by
+    # preflight) rather than mode.json so we get the post-default-fallback
+    # value. New mode has no branch concept — substitute empty string.
+    state_json = run_dir / "state.json"
+    state_data: dict[str, Any] = json.loads(state_json.read_text()) if state_json.exists() else {}
+    branch_name = state_data.get("branch_name") or ""
+    run_id = state_data.get("run_id") or run_dir.name
 
     resolved_text = (
         template_path.read_text()
         .replace("{HARNESS_ROOT}", str(HARNESS_ROOT))
         .replace("{run_dir}", str(run_dir))
-        .replace("{run_id}", run_dir.name)
         .replace("{target_repo_path}", str(target_repo_path))
         .replace("{lib_name}", str(lib_name))
+        .replace("{branch_name}", branch_name)
+        .replace("{run_id}", run_id)
     )
     resolved_dir = run_dir / ".prompts"
     resolved_dir.mkdir(exist_ok=True)
@@ -381,6 +430,9 @@ def stage_headless_with_gate(
             print(f"[run.py] headless stage {stage} failed rc={rc}", file=sys.stderr)
             sys.exit(rc)
         state["counters"]["total_stages"] += 1
+        # Register the stage output for harness-builder mode A schema (resume
+        # may trust this map and skip re-running).
+        state["stage_outputs"][stage] = str(output_marker.relative_to(run_dir))
         save_state(run_dir, state)
 
     if gate is None:
@@ -405,11 +457,19 @@ def stage_headless_with_gate(
                     "  <which public APIs break, migration strategy>\n"
                 )
             write_gate_request(run_dir, gate, title, context, options)
+        schema = (
+            GATE_DECISION_SCHEMA_EVOLVE_DESIGN
+            if gate == "gateB" and state["mode"] == "evolve"
+            else GATE_DECISION_SCHEMA
+        )
+        set_awaiting(state, schema)
+        save_state(run_dir, state)
         print(f"[run.py] paused at {gate}. Write {gate}.decision.md and rerun with --resume.", file=sys.stderr)
         sys.exit(0)
 
     if decision.get("decision") in ("approved", "approved_with_breaking"):
         state["gate_decisions"][gate] = decision["decision"]
+        clear_awaiting(state, user_input={f"{gate}.decision": decision})
         save_state(run_dir, state)
         return next_stage_on_approve
     elif decision.get("decision") == "rewrite":
@@ -423,6 +483,10 @@ def stage_headless_with_gate(
         (run_dir / f"{gate}.decision.md").unlink()
         (run_dir / f"{gate}.request.md").unlink(missing_ok=True)
         state["gate_decisions"][gate] = None
+        # Drop the stale output marker from the trust map; it'll be repopulated
+        # on the next successful run of this stage.
+        state["stage_outputs"].pop(stage, None)
+        clear_awaiting(state, user_input={f"{gate}.decision": decision})
         save_state(run_dir, state)
         return stage  # re-run this stage
     else:
@@ -438,6 +502,10 @@ def effective_thresholds(state: dict[str, Any], cfg: dict[str, Any]) -> dict[str
     "use the default". Returning all four lets the orchestrator both feed
     gates.py (line/branch) and hand s5 a resolved policy snapshot
     (max_major) instead of making the LLM re-derive overrides.
+
+    Also validates resolved values: coverage ratios in [0, 1], issue caps ≥ 0.
+    A nonsense override (e.g. line_coverage=1.5) would otherwise propagate to
+    gates.py / s5 and fail opaquely far from the cause.
     """
     base = cfg.get("thresholds", {}) or {}
     ov = state.get("overrides") or {}
@@ -446,12 +514,25 @@ def effective_thresholds(state: dict[str, Any], cfg: dict[str, Any]) -> dict[str
         if v is None:
             v = base.get(key, fallback)
         return v
-    return {
+    resolved = {
         "line_coverage": float(pick("line_coverage", 0.90)),
         "branch_coverage": float(pick("branch_coverage", 0.80)),
         "max_major_issues_new": int(pick("max_major_issues_new", 0)),
         "max_major_issues_evolve": int(pick("max_major_issues_evolve", 2)),
     }
+    bad: list[str] = []
+    for k in ("line_coverage", "branch_coverage"):
+        if not 0.0 <= resolved[k] <= 1.0:
+            bad.append(f"{k}={resolved[k]} (must be in [0.0, 1.0])")
+    for k in ("max_major_issues_new", "max_major_issues_evolve"):
+        if resolved[k] < 0:
+            bad.append(f"{k}={resolved[k]} (must be >= 0)")
+    if bad:
+        raise ValueError(
+            "invalid threshold override(s) in mode.json or config.yaml: "
+            + ", ".join(bad)
+        )
+    return resolved
 
 
 def write_effective_thresholds(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -> None:
@@ -528,6 +609,8 @@ def stage_s5_review(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) -
     if not verdict_path.exists():
         print("error: s5 did not produce verdict.yaml", file=sys.stderr)
         sys.exit(1)
+    # Register s5 output for the mode A schema (kept after this function returns).
+    state["stage_outputs"]["s5_review"] = str(verdict_path.relative_to(run_dir))
 
 
 def load_verdict(run_dir: Path) -> dict[str, Any]:
@@ -730,6 +813,7 @@ def escalate(run_dir: Path, state: dict[str, Any], trigger: str, verdict: dict[s
     # "<final_verdict>" row later, double-counting the same run in cross-run
     # stats. Now we record exactly one entry per run at its terminal state.
     state["last_escalation_trigger"] = trigger
+    set_awaiting(state, ESCALATION_DECISION_SCHEMA)
     save_state(run_dir, state)
     print(f"[run.py] escalation written to {path}. Resolve and rerun with --resume.", file=sys.stderr)
     sys.exit(2)
@@ -745,11 +829,19 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
     action = dec.get("action", "").strip()
     if action == "abort":
         # Terminal state: record one-and-only-one index entry for this run.
+        state["status"] = "done"
+        state["awaiting_input_schema"] = None
+        state["user_input"] = {"escalation.decision": dec}
+        save_state(run_dir, state)
         append_index_entry(
             state,
             final_status="aborted",
             escalation_trigger=state.get("last_escalation_trigger"),
         )
+        # Clean up the resolved escalation files even on abort so a curious
+        # reader doesn't see "awaiting" artifacts on a terminal run.
+        dec_path.unlink(missing_ok=True)
+        (run_dir / "escalation.md").unlink(missing_ok=True)
         print("[run.py] run aborted by user.", file=sys.stderr)
         sys.exit(0)
     if action == "resume_from_plan":
@@ -802,6 +894,7 @@ def handle_escalation_decision(run_dir: Path, state: dict[str, Any]) -> str | No
     # consume the escalation
     dec_path.unlink()
     (run_dir / "escalation.md").unlink(missing_ok=True)
+    clear_awaiting(state, user_input={"escalation.decision": dec})
     save_state(run_dir, state)
     return next_stage
 
@@ -938,6 +1031,8 @@ def main() -> int:
         if stage == "s8":
             write_delivery(run_dir, state, cfg)
             state["current_stage"] = "done"
+            state["status"] = "done"
+            state["awaiting_input_schema"] = None
             save_state(run_dir, state)
             print(f"[run.py] delivery.md written. Run complete: {run_dir}/delivery.md")
             return 0
@@ -995,7 +1090,8 @@ def write_delivery(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) ->
         f"# DELIVERY — {lib_name} ({mode})\n"
         f"\n"
         f"Run: `{state['run_id']}`\n"
-        f"Completed: {state.get('created_at')}\n"
+        f"Started: {state.get('created_at')}\n"
+        f"Completed: {dt.datetime.now().isoformat(timespec='seconds')}\n"
         f"Mode: **{mode}**\n"
         f"\n"
         f"## Gate decisions\n"
