@@ -21,10 +21,26 @@ Translate the approved design into a failing pytest suite that pins down the pub
 
 ### Where tests go
 
-- **new mode**: write tests directly into `{run_dir}/workspace/tests/`. Initialize the workspace first if it does not exist:
+- **new mode**: write tests directly into `{run_dir}/workspace/tests/`. Initialize the workspace first if it does not exist. The workspace must be its **own git repo** (not a subdirectory of the harness repo's worktree) so that history is self-contained when the user later moves the workspace.
+
+  Bootstrap (each command is idempotent — re-running is a no-op or a graceful no-op):
   ```bash
-  cd {run_dir}/workspace || (mkdir -p {run_dir}/workspace && cd {run_dir}/workspace && uv init --lib {lib_name})
+  mkdir -p {run_dir}/workspace
   ```
+  ```bash
+  git init -q -b main {run_dir}/workspace
+  ```
+  ```bash
+  cd {run_dir}/workspace && uv init --lib --name {lib_name} 2>/dev/null || true
+  ```
+  (`git init` on an existing repo is a no-op; `uv init` errors out if `pyproject.toml` already exists, which the `|| true` swallows on re-runs.)
+
+  Verify isolation:
+  ```bash
+  cd {run_dir}/workspace && git rev-parse --show-toplevel
+  ```
+  Must print `{run_dir}/workspace` (NOT the harness root). If it prints the harness root, `git init` did not take — stop and flag it.
+
   Configure `pyproject.toml` for `requires-python` from `interview/mode.json`, `ruff`, `mypy --strict`, pytest, and coverage.
 
   **Required dev dependencies** (install explicitly — these are what the mechanical gates need):
@@ -32,6 +48,8 @@ Translate the approved design into a failing pytest suite that pins down the pub
   cd {run_dir}/workspace && uv add --dev pytest pytest-cov mypy ruff
   ```
   `pytest-cov` in particular is **not optional** — the orchestrator's gates preflight-checks `import pytest_cov` and aborts the whole run with a toolchain error if it's missing.
+
+  **Initial commit**: after the workspace scaffolds and dev-deps install, commit the scaffold + the failing tests as one logical commit in the workspace repo (e.g. `chore: scaffold workspace` then `test: add failing suite for <feature>`). s4 will continue committing on this branch.
 
 - **evolve mode**: write **new** tests into `{run_dir}/s3/tests-new/` as a staging area. **Do not** touch `{target_repo_path}/tests/` in this stage — integration into the real tests directory happens in s4.
 

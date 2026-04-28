@@ -20,7 +20,9 @@ Make the failing tests pass with minimal, clean implementation that honors the d
 
 ## Where code goes
 
-- **new mode**: write implementation into `{run_dir}/workspace/src/{lib_name}/`.
+- **new mode**:
+  1. Write implementation into `{run_dir}/workspace/src/{lib_name}/`.
+  2. Commit in logical steps on the workspace's own git repo (`cd {run_dir}/workspace && git commit ...`) using Conventional Commits. No squashing. The workspace already has a git repo from s3 — verify with `cd {run_dir}/workspace && git rev-parse --show-toplevel` printing `{run_dir}/workspace` (NOT the harness root). If it prints the harness root, stop and flag it as a setup error from s3.
 - **evolve mode**:
   1. Copy/integrate tests from `{run_dir}/s3/tests-new/` into `{target_repo_path}/tests/`. Resolve conflicts per the manifest; if a conflict was flagged for user decision and no direction was given, stop and raise it.
   2. Modify `{target_repo_path}` source to make new tests pass while keeping existing tests green.
@@ -43,7 +45,7 @@ If any step fails, fix and retry. Self-limit internal retries: if after a small 
 - Deviations from `design.md` and why (each deviation: one paragraph).
 - Dependencies added with `uv add` and why each was necessary.
 - Any public API change relative to `api_stubs.py` (should be zero; if nonzero, justify and flag as breaking).
-- Evolve mode: summary of logical commits on the branch.
+- Summary of logical commits on the branch (new: workspace repo; evolve: harness branch in target repo).
 
 ### Evolve mode additionally: `{run_dir}/s4/changes.patch`
 

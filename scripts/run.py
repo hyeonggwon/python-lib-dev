@@ -372,9 +372,13 @@ STAGE_TOOLS: dict[str, str] = {
     # Plan / design: write planning artifacts into run_dir. No code execution needed.
     "s1_plan":      "Read,Grep,Glob,Write,Edit",
     "s2_design":    "Read,Grep,Glob,Write,Edit",
-    # Tests: scaffold uv workspace (new mode) + write test files. No git commits.
+    # Tests: scaffold uv workspace (new mode) + write test files. New-mode init
+    # also runs `git init` inside {run_dir}/workspace so the workspace is its
+    # own git repo (NOT a subdirectory of the harness's worktree) — see
+    # CLAUDE.md §10. The initial scaffold + failing-test commit lives there.
     # `uv` narrowed to non-publishing subcommands (no `uv publish`, no `uv build`).
-    "s3_tests":     "Read,Grep,Glob,Write,Edit,Bash(uv init *),Bash(uv add *),Bash(uv sync *),Bash(uv lock *),Bash(uv run *),Bash(mkdir *),Bash(ls *),Bash(cat *),Bash(cp *)",
+    # Git narrowed to non-destructive subcommands; init/add/commit/status only.
+    "s3_tests":     "Read,Grep,Glob,Write,Edit,Bash(uv init *),Bash(uv add *),Bash(uv sync *),Bash(uv lock *),Bash(uv run *),Bash(git init *),Bash(git add *),Bash(git commit *),Bash(git status *),Bash(git log *),Bash(git rev-parse *),Bash(mkdir *),Bash(ls *),Bash(cat *),Bash(cp *)",
     # Implementation: uv run loop + git commits on harness branch (evolve).
     # `uv` narrowed same as s3 (no publish/build). Git narrowed to non-destructive
     # subcommands (no reset/clean/push/rebase/branch). Both bare (`git <sub>`) and
@@ -1458,9 +1462,9 @@ def write_delivery(run_dir: Path, state: dict[str, Any], cfg: dict[str, Any]) ->
     lib_name = state.get("lib_name") or "<unknown>"
 
     next_actions_new = (
-        f"- Review `outputs/{state['run_id']}/workspace/`.\n"
-        f"- Move the workspace to your desired location (git init or drop into an existing mono-repo).\n"
-        f"- Set up remote, tag, and publish with `uv publish` when ready.\n"
+        f"- Review `outputs/{state['run_id']}/workspace/`. It is already its own git repo with a clean commit history (`git log` inside the workspace).\n"
+        f"- Move the workspace to your desired location with `mv` or `cp -r` — git history is preserved. (To drop into an existing mono-repo, use `git subtree add` or copy and re-init.)\n"
+        f"- Add a remote, tag, and publish with `uv publish` when ready.\n"
     )
     next_actions_evolve = (
         f"- Review the branch `{state.get('branch_name')}` in `{state.get('target_repo_path')}`.\n"

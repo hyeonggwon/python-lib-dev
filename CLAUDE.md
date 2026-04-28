@@ -97,7 +97,21 @@
 - 생성 라이브러리용 규약을 이 레포 루트에 끌어다 놓기 (pyproject.toml 등).
 - `mode.json.branch_name` 에 `"harness/<run-id>"` 같은 literal 문자열 저장 — `<run-id>` 가 그대로 git 브랜치명에 박힌다. 기본값일 때는 `null` 로 둬서 `run.py` preflight 가 `f"harness/{run_id}"` 로 채우게 할 것.
 
-## 10. 참고 포인터
+## 10. Workspace 격리 (new 모드)
+
+- `outputs/<run-id>/workspace/` 는 **자기 git repo** 다 (s3 가 `git init` + `uv init --lib` 으로 부트스트랩).
+- 따라서 workspace 안에서 `git rev-parse --show-toplevel` 은 항상 `outputs/<run-id>/workspace/` 를 가리킨다 — 하네스 레포가 아니다. s3 와 s4 prompt 가 이 invariant 를 자체 검증한다.
+- 격리 방식이 `.gitignore` (negative-space) 가 아니라 **별도 `.git`** (positive boundary) 인 이유:
+  - 사용자 메모리 정책: 구조적 강제 > 이중 검증.
+  - workspace 가 자기완결적 → `mv` 만으로 옮길 때 commit history 가 그대로 따라감.
+  - 에이전트가 workspace 안에서 git 명령을 실행해도 의도한 곳을 가리킴 (하네스 git 오염 위험 제거).
+- 절대 하지 말 것:
+  - s3 prompt 에서 `git init` 단계 제거 → 격리가 다시 `.gitignore` 의존으로 회귀.
+  - `uv init --vcs git` 만으로 충분하다고 가정 → uv 는 부모가 git worktree 면 nested `.git` 을 만들지 않는다 (검증 완료, 2026-04-28).
+  - workspace 를 **하네스 레포 root** 에서 git add 시도 → `.gitignore` 의 `outputs/` 룰로 막히지만 명시적 `git add -f` 는 우회 가능. 그런 코드를 추가하지 말 것.
+- evolve 모드는 해당 사항 없음 — 처음부터 `git -C {target_repo_path}` 로 외부 repo 만 만진다.
+
+## 11. 참고 포인터
 
 - 작업 명세 & 고정 스코프: `docs/task-spec.md`
 - 암묵지 (생성 라이브러리 대상): `docs/tacit-knowledge.md`
