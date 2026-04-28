@@ -378,7 +378,7 @@ STAGE_TOOLS: dict[str, str] = {
     # CLAUDE.md §10. The initial scaffold + failing-test commit lives there.
     # `uv` narrowed to non-publishing subcommands (no `uv publish`, no `uv build`).
     # Git narrowed to non-destructive subcommands; init/add/commit/status only.
-    "s3_tests":     "Read,Grep,Glob,Write,Edit,Bash(uv init *),Bash(uv add *),Bash(uv sync *),Bash(uv lock *),Bash(uv run *),Bash(git init *),Bash(git add *),Bash(git commit *),Bash(git status *),Bash(git log *),Bash(git rev-parse *),Bash(mkdir *),Bash(ls *),Bash(cat *),Bash(cp *)",
+    "s3_tests":     "Read,Grep,Glob,Write,Edit,Bash(uv init *),Bash(uv add *),Bash(uv sync *),Bash(uv lock *),Bash(uv run *),Bash(git init *),Bash(git add *),Bash(git commit *),Bash(git status *),Bash(git log *),Bash(git rev-parse *),Bash(git check-ignore *),Bash(mkdir *),Bash(ls *),Bash(cat *),Bash(cp *)",
     # Implementation: uv run loop + git commits on harness branch (evolve).
     # `uv` narrowed same as s3 (no publish/build). Git narrowed to non-destructive
     # subcommands (no reset/clean/push/rebase/branch). Both bare (`git <sub>`) and
