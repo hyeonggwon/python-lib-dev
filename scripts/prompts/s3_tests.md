@@ -41,6 +41,34 @@ Translate the approved design into a failing pytest suite that pins down the pub
   ```
   Must print `{run_dir}/workspace` (NOT the harness root). If it prints the harness root, `git init` did not take — stop and flag it.
 
+  **Write `.gitignore`** (use the Write tool to create `{run_dir}/workspace/.gitignore`). `uv init` skips creating `.gitignore` when it detects an outer git worktree (the harness), so without this step `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.coverage`, etc. would leak into the workspace's first commit. Exact content:
+
+  ```
+  # Python
+  __pycache__/
+  *.py[oc]
+  build/
+  dist/
+  wheels/
+  *.egg-info/
+
+  # Virtual environments
+  .venv
+
+  # Test / lint / coverage caches
+  .pytest_cache/
+  .mypy_cache/
+  .ruff_cache/
+  .coverage
+  .coverage.*
+  htmlcov/
+  coverage.xml
+
+  # OS / editor
+  .DS_Store
+  *.swp
+  ```
+
   Configure `pyproject.toml` for `requires-python` from `interview/mode.json`, `ruff`, `mypy --strict`, pytest, and coverage.
 
   **Required dev dependencies** (install explicitly — these are what the mechanical gates need):
