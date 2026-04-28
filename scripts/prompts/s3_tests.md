@@ -69,7 +69,11 @@ coverage.xml
 *.swp
 <<<GITIGNORE_END
 
-  After writing, sanity-check: `cd {run_dir}/workspace && git check-ignore -v .pytest_cache .ruff_cache .mypy_cache .coverage .venv` must print a matching rule for each path. If any path is not ignored, your `.gitignore` has a leading-whitespace bug — rewrite it.
+  After writing, sanity-check that no line starts with whitespace:
+  ```bash
+  grep -n '^[[:space:]]' {run_dir}/workspace/.gitignore
+  ```
+  This must print **nothing** (and exit 1). If it prints any line, your `.gitignore` has a leading-whitespace bug — rewrite the file flush-left and re-check.
 
   Configure `pyproject.toml` for `requires-python` from `interview/mode.json`, `ruff`, `mypy --strict`, pytest, and coverage.
 
